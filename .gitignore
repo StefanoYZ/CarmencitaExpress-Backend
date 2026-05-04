@@ -1,0 +1,25 @@
+# Entornos virtuales
+.venv/
+venv/
+env/
+
+# Variables de entorno
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+
+# IDE
+.idea/
+.vscode/
+
+# Logs
+*.log
+
+# Lycet externo / repo clonado
+external/lycet-master/
