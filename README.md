@@ -1,3 +1,4 @@
+
 # CarmencitaExpress-Backend
 
 Backend FastAPI para Carmencita Smart System. Este repositorio contiene solo el backend; el frontend vive en otra carpeta independiente y se conectara por HTTP usando endpoints REST y CORS.
@@ -13,7 +14,7 @@ SUNAT_ENV=mock
 SUNAT_PROVIDER=lycet
 SUNAT_ALLOW_REAL_EMISSION=false
 LYCET_API_URL=http://localhost:8001
-LYCET_CLIENT_TOKEN=123456
+LYCET_CLIENT_TOKEN=tu_token_aqui
 ```
 
 ### Endpoints minimos mock
@@ -129,3 +130,6 @@ POST http://localhost:8001/api/v1/invoice/send?token=123456
 ```
 
 Para beta, configurar `SUNAT_ENV=beta` y ejecutar Lycet aparte en `localhost:8001`. No usar datos reales de Carmencita ni credenciales reales para produccion.
+
+# CarmencitaExpress-Backend
+

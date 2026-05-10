@@ -5,3 +5,4 @@ pydantic-settings
 python-dotenv
 httpx
 reportlab
+mercadopago
