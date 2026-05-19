@@ -10,6 +10,8 @@ class QuoteRequest(BaseModel):
 class QuoteResponse(BaseModel):
     shipment_id: int = Field(alias="encomienda_id")
     shipment_code: str = Field(alias="codigo_encomienda")
+    origin: str = Field(alias="origen")
+    destination: str = Field(alias="destino")
     subtotal: float
     igv: float
     total: float

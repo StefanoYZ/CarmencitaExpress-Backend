@@ -5,6 +5,8 @@ pydantic-settings
 python-dotenv
 httpx
 reportlab
+qrcode
+Pillow
 mercadopago
 requests
 sqlalchemy
