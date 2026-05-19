@@ -1,26 +1,29 @@
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import Response
+from sqlalchemy.orm import Session
 
+from app.core.database import get_db
 from app.modules.sunat.exceptions import LycetClientError, SunatEmissionBlockedError
-from app.modules.sunat.pdf_service import generar_pdf_boleta_mock
-from app.modules.sunat.schema import BoletaDesdeEncomiendaRequest, BoletaResponse
+from app.modules.sunat.pdf_service import generate_mock_receipt_pdf
+from app.modules.sunat.schema import ReceiptFromShipmentRequest, ReceiptResponse
 from app.modules.sunat.service import (
-    emitir_boleta_desde_encomienda,
-    generar_pdf_beta_desde_encomienda,
-    generar_xml_beta_desde_encomienda,
-    get_boleta_mock,
+    generate_beta_pdf_from_shipment,
+    generate_beta_xml_from_shipment,
+    get_mock_receipt,
+    issue_receipt_from_shipment,
 )
 
 
 router = APIRouter(prefix="/sunat", tags=["sunat"])
 
 
-@router.post("/boletas/emitir-desde-encomienda", response_model=BoletaResponse)
-def emitir_boleta(payload: BoletaDesdeEncomiendaRequest) -> BoletaResponse:
+@router.post("/boletas/emitir-desde-encomienda", response_model=ReceiptResponse)
+def issue_receipt_endpoint(payload: ReceiptFromShipmentRequest, db: Session = Depends(get_db)) -> ReceiptResponse:
     try:
-        return emitir_boleta_desde_encomienda(
-            encomienda_id=payload.encomienda_id,
-            confirmar_pago=payload.confirmar_pago,
+        return issue_receipt_from_shipment(
+            db=db,
+            shipment_id=payload.shipment_id,
+            confirm_payment=payload.confirm_payment,
         )
     except LookupError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
@@ -33,11 +36,12 @@ def emitir_boleta(payload: BoletaDesdeEncomiendaRequest) -> BoletaResponse:
 
 
 @router.post("/boletas/beta/pdf-desde-encomienda")
-def generar_pdf_beta(payload: BoletaDesdeEncomiendaRequest) -> Response:
+def generate_beta_pdf_endpoint(payload: ReceiptFromShipmentRequest, db: Session = Depends(get_db)) -> Response:
     try:
-        filename, pdf_bytes = generar_pdf_beta_desde_encomienda(
-            encomienda_id=payload.encomienda_id,
-            confirmar_pago=payload.confirmar_pago,
+        filename, pdf_bytes = generate_beta_pdf_from_shipment(
+            db=db,
+            shipment_id=payload.shipment_id,
+            confirm_payment=payload.confirm_payment,
         )
     except LookupError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
@@ -56,11 +60,12 @@ def generar_pdf_beta(payload: BoletaDesdeEncomiendaRequest) -> Response:
 
 
 @router.post("/boletas/beta/xml-desde-encomienda")
-def generar_xml_beta(payload: BoletaDesdeEncomiendaRequest) -> dict:
+def generate_beta_xml_endpoint(payload: ReceiptFromShipmentRequest, db: Session = Depends(get_db)) -> dict:
     try:
-        return generar_xml_beta_desde_encomienda(
-            encomienda_id=payload.encomienda_id,
-            confirmar_pago=payload.confirmar_pago,
+        return generate_beta_xml_from_shipment(
+            db=db,
+            shipment_id=payload.shipment_id,
+            confirm_payment=payload.confirm_payment,
         )
     except LookupError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
@@ -73,12 +78,12 @@ def generar_xml_beta(payload: BoletaDesdeEncomiendaRequest) -> dict:
 
 
 @router.get("/boletas/mock/{serie}/{numero}/pdf")
-def descargar_pdf_mock(serie: str, numero: str) -> Response:
-    record = get_boleta_mock(serie, numero)
+def download_mock_pdf_endpoint(serie: str, numero: str) -> Response:
+    record = get_mock_receipt(serie, numero)
     if record is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Boleta mock no encontrada")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mock receipt not found")
 
-    pdf_bytes = generar_pdf_boleta_mock(record)
+    pdf_bytes = generate_mock_receipt_pdf(record)
     filename = f"boleta_mock_{serie}_{numero}.pdf"
     return Response(
         content=pdf_bytes,

@@ -5,17 +5,17 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
-from app.modules.sunat.schema import BoletaMockRecord
+from app.modules.sunat.schema import MockReceiptRecord
 
 
-def generar_pdf_boleta_mock(record: BoletaMockRecord) -> bytes:
+def generate_mock_receipt_pdf(record: MockReceiptRecord) -> bytes:
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=40, leftMargin=40, topMargin=40, bottomMargin=40)
     styles = getSampleStyleSheet()
     story = []
 
-    encomienda = record.encomienda
-    cotizacion = record.cotizacion
+    shipment = record.shipment
+    quote = record.quote
 
     story.append(Paragraph("BOLETA DE VENTA ELECTRONICA - MOCK", styles["Title"]))
     story.append(Paragraph("BOLETA DE PRUEBA - SIN VALOR TRIBUTARIO", styles["Heading2"]))
@@ -25,24 +25,24 @@ def generar_pdf_boleta_mock(record: BoletaMockRecord) -> bytes:
     story.append(Spacer(1, 16))
 
     data = [
-        ["Codigo de encomienda", record.codigo_encomienda],
-        ["Serie y numero", f"{record.serie}-{record.numero}"],
-        ["Fecha", record.fecha_emision],
-        ["Remitente", encomienda["remitente_nombre"]],
-        ["Documento remitente", f"{encomienda['remitente_tipo_documento']} {encomienda['remitente_numero_documento']}"],
-        ["Direccion remitente", encomienda.get("remitente_direccion") or ""],
-        ["Telefono remitente", encomienda.get("remitente_telefono") or ""],
-        ["Destinatario", encomienda["destinatario_nombre"]],
-        ["Documento destinatario", _documento_destinatario(encomienda)],
-        ["Destino", encomienda["destino"]],
-        ["Servicio", encomienda["descripcion"]],
-        ["Ruta", f"{encomienda['origen']} -> {encomienda['destino']}"],
-        ["Peso", f"{encomienda['peso_kg']} kg"],
-        ["Dimensiones", f"{encomienda['largo_cm']} x {encomienda['ancho_cm']} x {encomienda['alto_cm']} cm"],
-        ["Fragilidad", encomienda["fragilidad"]],
-        ["Subtotal", f"S/ {cotizacion['subtotal']:.2f}"],
-        ["IGV", f"S/ {cotizacion['igv']:.2f}"],
-        ["Total", f"S/ {cotizacion['total']:.2f}"],
+        ["Codigo de encomienda", record.shipment_code],
+        ["Serie y numero", f"{record.series}-{record.number}"],
+        ["Fecha", record.issue_date],
+        ["Remitente", shipment["sender_name"]],
+        ["Documento remitente", f"{shipment['sender_document_type']} {shipment['sender_document_number']}"],
+        ["Direccion remitente", shipment.get("sender_address") or ""],
+        ["Telefono remitente", shipment.get("sender_phone") or ""],
+        ["Destinatario", shipment["recipient_name"]],
+        ["Documento destinatario", _recipient_document(shipment)],
+        ["Destino", shipment["destination"]],
+        ["Servicio", shipment["description"]],
+        ["Ruta", f"{shipment['origin']} -> {shipment['destination']}"],
+        ["Peso", f"{shipment['weight_kg']} kg"],
+        ["Dimensiones", f"{shipment['length_cm']} x {shipment['width_cm']} x {shipment['height_cm']} cm"],
+        ["Fragilidad", shipment["fragility"]],
+        ["Subtotal", f"S/ {quote['subtotal']:.2f}"],
+        ["IGV", f"S/ {quote['igv']:.2f}"],
+        ["Total", f"S/ {quote['total']:.2f}"],
     ]
 
     table = Table(data, colWidths=[160, 320])
@@ -72,7 +72,8 @@ def generar_pdf_boleta_mock(record: BoletaMockRecord) -> bytes:
     return buffer.read()
 
 
-def _documento_destinatario(encomienda: dict) -> str:
-    tipo = encomienda.get("destinatario_tipo_documento") or ""
-    numero = encomienda.get("destinatario_numero_documento") or ""
-    return f"{tipo} {numero}".strip()
+def _recipient_document(shipment: dict) -> str:
+    document_type = shipment.get("recipient_document_type") or ""
+    document_number = shipment.get("recipient_document_number") or ""
+    return f"{document_type} {document_number}".strip()
+
