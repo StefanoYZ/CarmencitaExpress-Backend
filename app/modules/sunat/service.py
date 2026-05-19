@@ -11,10 +11,10 @@ from app.modules.sunat.client import LycetClient
 from app.modules.sunat.exceptions import SunatEmissionBlockedError
 from app.modules.sunat.schema import MockReceiptRecord, ReceiptResponse
 from app.modules.shipments.model import Shipment
+from app.modules.shipments.constants import CANCELED_STATUS, PRE_REGISTERED_STATUS
 
 
 MOCK_RECEIPT_SERIES = "B001"
-CANCELED_STATUS = "ANULADA"
 
 # TODO: reemplazar este almacenamiento en memoria por repository + PostgreSQL.
 _mock_receipts_store: dict[tuple[str, str], MockReceiptRecord] = {}
@@ -153,8 +153,7 @@ def issue_receipt_from_shipment(db: Session, shipment_id: int, confirm_payment: 
     shipment = get_shipment(db, shipment_id)
     if shipment is None:
         raise LookupError("Shipment not found")
-    if shipment.status == CANCELED_STATUS:
-        raise ValueError("No se puede emitir boleta para una encomienda anulada")
+    _validate_shipment_can_emit_receipt(shipment)
 
     quote = calculate_quote_for_shipment(shipment)
     number = _next_receipt_number()
@@ -233,8 +232,7 @@ def _build_beta_payload_from_shipment(
     shipment = get_shipment(db, shipment_id)
     if shipment is None:
         raise LookupError("Shipment not found")
-    if shipment.status == CANCELED_STATUS:
-        raise ValueError("No se puede emitir boleta para una encomienda anulada")
+    _validate_shipment_can_emit_receipt(shipment)
 
     quote = calculate_quote_for_shipment(shipment)
     payload = build_receipt_payload(shipment, quote)
@@ -317,10 +315,19 @@ def _shipment_to_dict(shipment: Shipment) -> dict[str, Any]:
         "width_cm": shipment.width_cm,
         "height_cm": shipment.height_cm,
         "fragility": shipment.fragility,
+        "content_type": shipment.content_type,
+        "registration_origin": shipment.registration_origin,
         "status": shipment.status,
         "created_at": shipment.created_at,
         "updated_at": shipment.updated_at,
     }
+
+
+def _validate_shipment_can_emit_receipt(shipment: Shipment) -> None:
+    if shipment.status == CANCELED_STATUS:
+        raise ValueError("No se puede emitir boleta para una encomienda anulada")
+    if shipment.status == PRE_REGISTERED_STATUS:
+        raise ValueError("No se puede emitir boleta para una encomienda pre-registrada")
 
 
 def _normalize_lycet_response(raw_response: dict[str, Any]) -> dict[str, Any]:
