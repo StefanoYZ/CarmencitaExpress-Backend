@@ -1,39 +1,42 @@
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
-class BoletaDesdeEncomiendaRequest(BaseModel):
-    encomienda_id: int
-    confirmar_pago: bool = True
+class ReceiptFromShipmentRequest(BaseModel):
+    shipment_id: int = Field(alias="encomienda_id")
+    confirm_payment: bool = Field(default=True, alias="confirmar_pago")
 
 
-class BoletaResponse(BaseModel):
+class ReceiptResponse(BaseModel):
     success: bool
-    ambiente: str
-    estado: str
-    serie: str
-    numero: str
-    fecha_emision: str
-    codigo_encomienda: str
+    environment: str = Field(alias="ambiente")
+    status: str = Field(alias="estado")
+    series: str = Field(alias="serie")
+    number: str = Field(alias="numero")
+    issue_date: str = Field(alias="fecha_emision")
+    shipment_code: str = Field(alias="codigo_encomienda")
     total: float
     subtotal: float
     igv: float
-    moneda: str
-    mensaje: str
+    currency: str = Field(alias="moneda")
+    message: str = Field(alias="mensaje")
     hash: str | None = None
     pdf_url: str | None = None
     xml_url: str | None = None
     cdr: str | None = None
+    cdr_code: str | None = None
+    cdr_description: str | None = None
+    cdr_notes: list[str] = Field(default_factory=list)
     raw_response: dict[str, Any] | None = None
 
 
-class BoletaMockRecord(BaseModel):
-    serie: str
-    numero: str
-    codigo_encomienda: str
-    encomienda: dict[str, Any]
-    cotizacion: dict[str, Any]
-    fecha_emision: str
+class MockReceiptRecord(BaseModel):
+    series: str = Field(alias="serie")
+    number: str = Field(alias="numero")
+    shipment_code: str = Field(alias="codigo_encomienda")
+    shipment: dict[str, Any] = Field(alias="encomienda")
+    quote: dict[str, Any] = Field(alias="cotizacion")
+    issue_date: str = Field(alias="fecha_emision")
     hash: str
     raw_response: dict[str, Any]

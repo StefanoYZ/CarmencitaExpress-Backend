@@ -1,70 +1,73 @@
 from datetime import date, datetime
 from typing import Any
 
+from sqlalchemy.orm import Session
+
 from app.core.config import settings
-from app.modules.cotizacion.schema import CotizacionResponse
-from app.modules.cotizacion.service import calcular_cotizacion_para_encomienda
-from app.modules.encomiendas.schema import EncomiendaResponse
-from app.modules.encomiendas.service import get_encomienda
+from app.modules.quotes.schema import QuoteResponse
+from app.modules.quotes.service import calculate_quote_for_shipment
+from app.modules.shipments.service import get_shipment
 from app.modules.sunat.client import LycetClient
 from app.modules.sunat.exceptions import SunatEmissionBlockedError
-from app.modules.sunat.schema import BoletaMockRecord, BoletaResponse
+from app.modules.sunat.schema import MockReceiptRecord, ReceiptResponse
+from app.modules.shipments.model import Shipment
 
 
-SERIE_BOLETA_MOCK = "B001"
+MOCK_RECEIPT_SERIES = "B001"
+CANCELED_STATUS = "ANULADA"
 
 # TODO: reemplazar este almacenamiento en memoria por repository + PostgreSQL.
-_boletas_mock_store: dict[tuple[str, str], BoletaMockRecord] = {}
-_next_boleta_mock_number = 1
+_mock_receipts_store: dict[tuple[str, str], MockReceiptRecord] = {}
+_next_mock_receipt_number = 1
 
 
-def _next_boleta_number() -> str:
-    global _next_boleta_mock_number
+def _next_receipt_number() -> str:
+    global _next_mock_receipt_number
 
-    numero = f"{_next_boleta_mock_number:06d}"
-    _next_boleta_mock_number += 1
-    return numero
+    number = f"{_next_mock_receipt_number:06d}"
+    _next_mock_receipt_number += 1
+    return number
 
 
-def _tipo_documento_sunat(tipo_documento: str) -> str:
-    tipo = tipo_documento.strip().upper()
-    if tipo == "DNI":
+def _sunat_document_type(document_type: str) -> str:
+    normalized_type = document_type.strip().upper()
+    if normalized_type == "DNI":
         return "1"
-    if tipo == "RUC":
+    if normalized_type == "RUC":
         return "6"
     return "0"
 
 
-def build_boleta_payload(
-    encomienda: EncomiendaResponse,
-    cotizacion: CotizacionResponse,
+def build_receipt_payload(
+    shipment: Shipment,
+    quote: QuoteResponse,
     correlativo: str | None = None,
 ) -> dict[str, Any]:
-    correlativo = correlativo or _next_boleta_number()
-    descripcion = (
-        f"SERVICIO DE TRANSPORTE DE ENCOMIENDA - {encomienda.origen} A {encomienda.destino} "
-        f"- CODIGO {encomienda.codigo_encomienda}"
+    correlativo = correlativo or _next_receipt_number()
+    description = (
+        f"SERVICIO DE TRANSPORTE DE ENCOMIENDA - {shipment.origin} A {shipment.destination} "
+        f"- CODIGO {shipment.shipment_code}"
     )
 
     return {
         "ublVersion": "2.1",
         "tipoOperacion": "0101",
         "tipoDoc": "03",
-        "serie": SERIE_BOLETA_MOCK,
+        "serie": MOCK_RECEIPT_SERIES,
         "correlativo": correlativo,
         "fechaEmision": datetime.now().astimezone().isoformat(timespec="seconds"),
         "tipoMoneda": "PEN",
         "formaPago": {
             "moneda": "PEN",
             "tipo": "Contado",
-            "monto": cotizacion.total,
+            "monto": quote.total,
         },
         "client": {
-            "tipoDoc": _tipo_documento_sunat(encomienda.remitente_tipo_documento),
-            "numDoc": encomienda.remitente_numero_documento,
-            "rznSocial": encomienda.remitente_nombre,
+            "tipoDoc": _sunat_document_type(shipment.sender_document_type),
+            "numDoc": shipment.sender_document_number,
+            "rznSocial": shipment.sender_name,
             "address": {
-                "direccion": encomienda.remitente_direccion or "",
+                "direccion": shipment.sender_address or "",
                 "provincia": "",
                 "departamento": "",
                 "distrito": "",
@@ -73,7 +76,7 @@ def build_boleta_payload(
             },
         },
         "company": {
-            # TODO: configurar datos oficiales solo cuando se habilite emision autorizada.
+            # TODO: configurar datos oficiales del emisor solo cuando se habilite emision real autorizada.
             "ruc": "20000000001",
             "razonSocial": "Empresa Demo - Modo Desarrollo",
             "nombreComercial": "Carmencita Express Cargo S.A.C. (modo desarrollo)",
@@ -86,29 +89,29 @@ def build_boleta_payload(
                 "codigoPais": "PE",
             },
         },
-        "mtoOperGravadas": cotizacion.subtotal,
-        "mtoIGV": cotizacion.igv,
-        "totalImpuestos": cotizacion.igv,
-        "valorVenta": cotizacion.subtotal,
-        "subTotal": cotizacion.total,
-        "mtoImpVenta": cotizacion.total,
+        "mtoOperGravadas": quote.subtotal,
+        "mtoIGV": quote.igv,
+        "totalImpuestos": quote.igv,
+        "valorVenta": quote.subtotal,
+        "subTotal": quote.total,
+        "mtoImpVenta": quote.total,
         "details": [
             {
                 "unidad": "ZZ",
                 "cantidad": 1,
-                "codProducto": encomienda.codigo_encomienda,
+                "codProducto": shipment.shipment_code,
                 "codProdSunat": "78101802",
-                "descripcion": descripcion,
-                "mtoValorUnitario": cotizacion.subtotal,
+                "descripcion": description,
+                "mtoValorUnitario": quote.subtotal,
                 "descuento": 0,
-                "igv": cotizacion.igv,
+                "igv": quote.igv,
                 "tipAfeIgv": "10",
                 "isc": 0,
-                "totalImpuestos": cotizacion.igv,
-                "mtoPrecioUnitario": cotizacion.total,
-                "mtoValorVenta": cotizacion.subtotal,
+                "totalImpuestos": quote.igv,
+                "mtoPrecioUnitario": quote.total,
+                "mtoValorVenta": quote.subtotal,
                 "mtoValorGratuito": 0,
-                "mtoBaseIgv": cotizacion.subtotal,
+                "mtoBaseIgv": quote.subtotal,
                 "porcentajeIgv": 18,
                 "mtoBaseIsc": 0,
                 "tipSisIsc": "",
@@ -123,155 +126,216 @@ def build_boleta_payload(
         "legends": [
             {
                 "code": "1000",
-                # TODO: convertir el total a letras correctamente.
-                "value": f"SON {cotizacion.total:.2f} SOLES",
+                # TODO: convertir correctamente el monto total a letras.
+                "value": f"SON {quote.total:.2f} SOLES",
             }
         ],
         "metadata": {
-            "codigo_encomienda": encomienda.codigo_encomienda,
+            "codigo_encomienda": shipment.shipment_code,
             "destinatario": {
-                "tipo_documento": encomienda.destinatario_tipo_documento,
-                "numero_documento": encomienda.destinatario_numero_documento,
-                "nombre": encomienda.destinatario_nombre,
-                "direccion": encomienda.destinatario_direccion,
-                "telefono": encomienda.destinatario_telefono,
+                "tipo_documento": shipment.recipient_document_type,
+                "numero_documento": shipment.recipient_document_number,
+                "nombre": shipment.recipient_name,
+                "direccion": shipment.recipient_address,
+                "telefono": shipment.recipient_phone,
             },
         },
     }
 
 
-def emitir_boleta_desde_encomienda(encomienda_id: int, confirmar_pago: bool = True) -> BoletaResponse:
+def issue_receipt_from_shipment(db: Session, shipment_id: int, confirm_payment: bool = True) -> ReceiptResponse:
     if settings.production_emission_blocked:
-        raise SunatEmissionBlockedError("Emision real bloqueada por configuracion")
+        raise SunatEmissionBlockedError("Real emission is blocked by configuration")
 
-    if not confirmar_pago:
-        raise ValueError("Debe confirmar el pago para emitir la boleta")
+    if not confirm_payment:
+        raise ValueError("Payment must be confirmed before issuing the receipt")
 
-    encomienda = get_encomienda(encomienda_id)
-    if encomienda is None:
-        raise LookupError("Encomienda no encontrada")
+    shipment = get_shipment(db, shipment_id)
+    if shipment is None:
+        raise LookupError("Shipment not found")
+    if shipment.status == CANCELED_STATUS:
+        raise ValueError("No se puede emitir boleta para una encomienda anulada")
 
-    cotizacion = calcular_cotizacion_para_encomienda(encomienda)
-    numero = _next_boleta_number()
-    payload = build_boleta_payload(encomienda, cotizacion, numero)
+    quote = calculate_quote_for_shipment(shipment)
+    number = _next_receipt_number()
+    payload = build_receipt_payload(shipment, quote, number)
 
     if settings.sunat_env == "mock":
-        return _emitir_boleta_mock(encomienda, cotizacion, payload, numero)
+        return _issue_mock_receipt(shipment, quote, payload, number)
 
     if settings.sunat_env == "beta":
         result = LycetClient().emitir_boleta(payload)
+        raw_response = result.get("raw_response", result)
+        normalized = _normalize_lycet_response(raw_response)
         today = date.today().isoformat()
-        return BoletaResponse(
+        return ReceiptResponse(
             success=result.get("success", False),
             ambiente="beta",
-            estado=result.get("estado", "ENVIADO_BETA"),
-            serie=SERIE_BOLETA_MOCK,
-            numero=numero,
+            estado=normalized["status"],
+            serie=MOCK_RECEIPT_SERIES,
+            numero=number,
             fecha_emision=today,
-            codigo_encomienda=encomienda.codigo_encomienda,
-            total=cotizacion.total,
-            subtotal=cotizacion.subtotal,
-            igv=cotizacion.igv,
-            moneda=cotizacion.moneda,
-            mensaje=result.get("mensaje", "Boleta enviada a Lycet beta."),
-            raw_response=result.get("raw_response", result),
+            codigo_encomienda=shipment.shipment_code,
+            total=quote.total,
+            subtotal=quote.subtotal,
+            igv=quote.igv,
+            moneda=quote.currency,
+            mensaje=result.get("mensaje", "Receipt sent to Lycet beta."),
+            hash=normalized["hash"],
+            cdr=normalized["cdr"],
+            cdr_code=normalized["cdr_code"],
+            cdr_description=normalized["cdr_description"],
+            cdr_notes=normalized["cdr_notes"],
+            raw_response=raw_response,
         )
 
-    raise SunatEmissionBlockedError("SUNAT_ENV=production esta bloqueado para esta etapa")
+    raise SunatEmissionBlockedError("SUNAT_ENV=production is blocked for this stage")
 
 
-def generar_pdf_beta_desde_encomienda(encomienda_id: int, confirmar_pago: bool = True) -> tuple[str, bytes]:
-    encomienda, cotizacion, payload = _build_beta_payload_desde_encomienda(encomienda_id, confirmar_pago)
+def generate_beta_pdf_from_shipment(db: Session, shipment_id: int, confirm_payment: bool = True) -> tuple[str, bytes]:
+    shipment, _quote, payload = _build_beta_payload_from_shipment(db, shipment_id, confirm_payment)
     pdf_bytes = LycetClient().generar_pdf(payload)
-    filename = f"boleta_beta_{encomienda.codigo_encomienda}.pdf"
+    filename = f"boleta_beta_{shipment.shipment_code}.pdf"
     return filename, pdf_bytes
 
 
-def generar_xml_beta_desde_encomienda(encomienda_id: int, confirmar_pago: bool = True) -> dict[str, Any]:
-    encomienda, _cotizacion, payload = _build_beta_payload_desde_encomienda(encomienda_id, confirmar_pago)
+def generate_beta_xml_from_shipment(db: Session, shipment_id: int, confirm_payment: bool = True) -> dict[str, Any]:
+    shipment, _quote, payload = _build_beta_payload_from_shipment(db, shipment_id, confirm_payment)
     lycet_response = LycetClient().generar_xml(payload)
 
     if isinstance(lycet_response, str):
         return {
             "success": True,
             "ambiente": "beta",
-            "codigo_encomienda": encomienda.codigo_encomienda,
+            "codigo_encomienda": shipment.shipment_code,
             "xml": lycet_response,
         }
 
     return {
         "success": True,
         "ambiente": "beta",
-        "codigo_encomienda": encomienda.codigo_encomienda,
+        "codigo_encomienda": shipment.shipment_code,
         "raw_response": lycet_response,
     }
 
 
-def _build_beta_payload_desde_encomienda(
-    encomienda_id: int,
-    confirmar_pago: bool,
-) -> tuple[EncomiendaResponse, CotizacionResponse, dict[str, Any]]:
+def _build_beta_payload_from_shipment(
+    db: Session,
+    shipment_id: int,
+    confirm_payment: bool,
+) -> tuple[Shipment, QuoteResponse, dict[str, Any]]:
     if settings.sunat_env != "beta":
-        raise SunatEmissionBlockedError("Este endpoint solo funciona cuando SUNAT_ENV=beta")
+        raise SunatEmissionBlockedError("This endpoint only works when SUNAT_ENV=beta")
 
-    if not confirmar_pago:
-        raise ValueError("Debe confirmar el pago para generar el comprobante beta")
+    if not confirm_payment:
+        raise ValueError("Payment must be confirmed before generating the beta document")
 
-    encomienda = get_encomienda(encomienda_id)
-    if encomienda is None:
-        raise LookupError("Encomienda no encontrada")
+    shipment = get_shipment(db, shipment_id)
+    if shipment is None:
+        raise LookupError("Shipment not found")
+    if shipment.status == CANCELED_STATUS:
+        raise ValueError("No se puede emitir boleta para una encomienda anulada")
 
-    cotizacion = calcular_cotizacion_para_encomienda(encomienda)
-    payload = build_boleta_payload(encomienda, cotizacion)
-    return encomienda, cotizacion, payload
+    quote = calculate_quote_for_shipment(shipment)
+    payload = build_receipt_payload(shipment, quote)
+    return shipment, quote, payload
 
 
-def _emitir_boleta_mock(
-    encomienda: EncomiendaResponse,
-    cotizacion: CotizacionResponse,
+def _issue_mock_receipt(
+    shipment: Shipment,
+    quote: QuoteResponse,
     payload: dict[str, Any],
-    numero: str,
-) -> BoletaResponse:
-    fecha_emision = date.today().isoformat()
-    mock_hash = f"MOCK-HASH-{SERIE_BOLETA_MOCK}-{numero}"
+    number: str,
+) -> ReceiptResponse:
+    issue_date = date.today().isoformat()
+    mock_hash = f"MOCK-HASH-{MOCK_RECEIPT_SERIES}-{number}"
     raw_response = {
         "modo": "mock",
         "advertencia": "Este comprobante es simulado y no fue enviado a SUNAT.",
         "payload": payload,
     }
 
-    record = BoletaMockRecord(
-        serie=SERIE_BOLETA_MOCK,
-        numero=numero,
-        codigo_encomienda=encomienda.codigo_encomienda,
-        encomienda=encomienda.model_dump(),
-        cotizacion=cotizacion.model_dump(),
-        fecha_emision=fecha_emision,
+    record = MockReceiptRecord(
+        serie=MOCK_RECEIPT_SERIES,
+        numero=number,
+        codigo_encomienda=shipment.shipment_code,
+        encomienda=_shipment_to_dict(shipment),
+        cotizacion=quote.model_dump(),
+        fecha_emision=issue_date,
         hash=mock_hash,
         raw_response=raw_response,
     )
-    _boletas_mock_store[(SERIE_BOLETA_MOCK, numero)] = record
+    _mock_receipts_store[(MOCK_RECEIPT_SERIES, number)] = record
 
-    return BoletaResponse(
+    return ReceiptResponse(
         success=True,
         ambiente="mock",
         estado="ACEPTADO_MOCK",
-        serie=SERIE_BOLETA_MOCK,
-        numero=numero,
-        fecha_emision=fecha_emision,
-        codigo_encomienda=encomienda.codigo_encomienda,
-        total=cotizacion.total,
-        subtotal=cotizacion.subtotal,
-        igv=cotizacion.igv,
-        moneda=cotizacion.moneda,
+        serie=MOCK_RECEIPT_SERIES,
+        numero=number,
+        fecha_emision=issue_date,
+        codigo_encomienda=shipment.shipment_code,
+        total=quote.total,
+        subtotal=quote.subtotal,
+        igv=quote.igv,
+        moneda=quote.currency,
         mensaje="Boleta simulada generada correctamente. Documento sin valor tributario.",
         hash=mock_hash,
-        pdf_url=f"{settings.api_prefix}/sunat/boletas/mock/{SERIE_BOLETA_MOCK}/{numero}/pdf",
+        pdf_url=f"{settings.api_prefix}/sunat/boletas/mock/{MOCK_RECEIPT_SERIES}/{number}/pdf",
         xml_url=None,
         cdr=None,
+        cdr_code=None,
+        cdr_description=None,
+        cdr_notes=[],
         raw_response=raw_response,
     )
 
 
-def get_boleta_mock(serie: str, numero: str) -> BoletaMockRecord | None:
-    return _boletas_mock_store.get((serie, numero))
+def get_mock_receipt(series: str, number: str) -> MockReceiptRecord | None:
+    return _mock_receipts_store.get((series, number))
+
+
+def _shipment_to_dict(shipment: Shipment) -> dict[str, Any]:
+    return {
+        "id": shipment.id,
+        "shipment_code": shipment.shipment_code,
+        "sender_document_type": shipment.sender_document_type,
+        "sender_document_number": shipment.sender_document_number,
+        "sender_name": shipment.sender_name,
+        "sender_address": shipment.sender_address,
+        "sender_phone": shipment.sender_phone,
+        "recipient_document_type": shipment.recipient_document_type,
+        "recipient_document_number": shipment.recipient_document_number,
+        "recipient_name": shipment.recipient_name,
+        "recipient_address": shipment.recipient_address,
+        "recipient_phone": shipment.recipient_phone,
+        "origin": shipment.origin,
+        "destination": shipment.destination,
+        "description": shipment.description,
+        "weight_kg": shipment.weight_kg,
+        "length_cm": shipment.length_cm,
+        "width_cm": shipment.width_cm,
+        "height_cm": shipment.height_cm,
+        "fragility": shipment.fragility,
+        "status": shipment.status,
+        "created_at": shipment.created_at,
+        "updated_at": shipment.updated_at,
+    }
+
+
+def _normalize_lycet_response(raw_response: dict[str, Any]) -> dict[str, Any]:
+    sunat_response = raw_response.get("sunatResponse") or {}
+    cdr_response = sunat_response.get("cdrResponse") or {}
+    cdr_code = cdr_response.get("code")
+    cdr_notes = cdr_response.get("notes") or []
+    if isinstance(cdr_notes, str):
+        cdr_notes = [cdr_notes]
+
+    return {
+        "status": "ACEPTADO" if cdr_code == "0" else raw_response.get("estado", "ENVIADO_BETA"),
+        "hash": raw_response.get("hash"),
+        "cdr": sunat_response.get("cdrZip"),
+        "cdr_code": cdr_code,
+        "cdr_description": cdr_response.get("description"),
+        "cdr_notes": cdr_notes,
+    }
