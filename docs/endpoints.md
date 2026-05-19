@@ -1,5 +1,9 @@
 # Endpoints y Flujo De Desarrollo
 
+Nota: la logica de negocio Sprint 1 para pre-registro, anulacion con motivo, tarifa por ruta, etiqueta QR y entrega base esta documentada en `docs/business-core.md`.
+
+Nota: la autenticacion interna, roles dinamicos y permisos se documentan en `docs/auth-roles-permissions.md`.
+
 ## Base De Datos
 
 El backend usa PostgreSQL mediante SQLAlchemy.
