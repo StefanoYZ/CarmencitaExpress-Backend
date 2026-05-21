@@ -1,0 +1,238 @@
+from datetime import datetime
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from app.modules.shipments.constants import (
+    FRAGILITY_VALUES,
+    SHIPMENT_STATUS_VALUES,
+)
+
+
+class ShipmentPayloadBase(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    sender_document_type: str = Field(alias="remitente_tipo_documento")
+    sender_document_number: str = Field(alias="remitente_numero_documento")
+    sender_name: str = Field(alias="remitente_nombre")
+    sender_address: str | None = Field(default=None, alias="remitente_direccion")
+    sender_phone: str | None = Field(default=None, alias="remitente_telefono")
+
+    recipient_document_type: str | None = Field(default=None, alias="destinatario_tipo_documento")
+    recipient_document_number: str | None = Field(default=None, alias="destinatario_numero_documento")
+    recipient_name: str = Field(alias="destinatario_nombre")
+    recipient_address: str | None = Field(default=None, alias="destinatario_direccion")
+    recipient_phone: str | None = Field(default=None, alias="destinatario_telefono")
+
+    origin: str = Field(default="Trujillo", alias="origen")
+    destination: str = Field(alias="destino")
+    description: str = Field(alias="descripcion")
+    content_type: str | None = Field(default=None, alias="tipo_contenido")
+    weight_kg: float = Field(alias="peso_kg")
+    length_cm: float = Field(alias="largo_cm")
+    width_cm: float = Field(alias="ancho_cm")
+    height_cm: float = Field(alias="alto_cm")
+    fragility: str = Field(alias="fragilidad")
+
+    @field_validator("sender_document_type", "sender_document_number", "sender_name", "recipient_name", "description")
+    @classmethod
+    def required_text(cls, value: str) -> str:
+        if not value or not value.strip():
+            raise ValueError("The field cannot be empty")
+        return value.strip()
+
+    @field_validator("origin", "destination")
+    @classmethod
+    def normalize_route(cls, value: str) -> str:
+        if not value or not value.strip():
+            raise ValueError("origin and destination cannot be empty")
+        return value.strip()
+
+    @field_validator(
+        "sender_address",
+        "sender_phone",
+        "recipient_document_number",
+        "recipient_address",
+        "recipient_phone",
+    )
+    @classmethod
+    def normalize_optional_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+    @field_validator("sender_document_type", "recipient_document_type", "content_type")
+    @classmethod
+    def normalize_codes(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized.upper() if normalized else None
+
+    @field_validator("weight_kg", "length_cm", "width_cm", "height_cm")
+    @classmethod
+    def dimensions_must_be_positive(cls, value: float) -> float:
+        if value <= 0:
+            raise ValueError("weight_kg, length_cm, width_cm and height_cm must be greater than 0")
+        return value
+
+    @field_validator("fragility")
+    @classmethod
+    def normalize_fragility(cls, value: str) -> str:
+        fragility = value.strip().upper() if value else ""
+        if fragility not in FRAGILITY_VALUES:
+            raise ValueError("fragility must be BAJA, MEDIA or ALTA")
+        return fragility
+
+
+class ShipmentCreate(ShipmentPayloadBase):
+    pass
+
+
+class ShipmentPreRegistrationCreate(ShipmentPayloadBase):
+    pass
+
+
+class ShipmentResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+    id: int
+    shipment_code: str = Field(alias="codigo_encomienda")
+
+    sender_document_type: str = Field(alias="remitente_tipo_documento")
+    sender_document_number: str = Field(alias="remitente_numero_documento")
+    sender_name: str = Field(alias="remitente_nombre")
+    sender_address: str | None = Field(default=None, alias="remitente_direccion")
+    sender_phone: str | None = Field(default=None, alias="remitente_telefono")
+
+    recipient_document_type: str | None = Field(default=None, alias="destinatario_tipo_documento")
+    recipient_document_number: str | None = Field(default=None, alias="destinatario_numero_documento")
+    recipient_name: str = Field(alias="destinatario_nombre")
+    recipient_address: str | None = Field(default=None, alias="destinatario_direccion")
+    recipient_phone: str | None = Field(default=None, alias="destinatario_telefono")
+
+    origin: str = Field(alias="origen")
+    destination: str = Field(alias="destino")
+    description: str = Field(alias="descripcion")
+    content_type: str | None = Field(default=None, alias="tipo_contenido")
+    weight_kg: float = Field(alias="peso_kg")
+    length_cm: float = Field(alias="largo_cm")
+    width_cm: float = Field(alias="ancho_cm")
+    height_cm: float = Field(alias="alto_cm")
+    fragility: str = Field(alias="fragilidad")
+    registration_origin: str | None = Field(default=None, alias="origen_registro")
+    status: str = Field(alias="estado")
+    cancellation_reason: str | None = Field(default=None, alias="motivo_anulacion")
+    canceled_at: datetime | None = Field(default=None, alias="fecha_anulacion")
+    delivered_at: datetime | None = Field(default=None, alias="fecha_entrega")
+    delivery_receiver_document: str | None = Field(default=None, alias="dni_receptor_entrega")
+    digital_signature_base64: str | None = Field(default=None, alias="firma_digital_base64")
+    security_key: str | None = Field(default=None, alias="clave_seguridad")
+    created_at: datetime = Field(alias="fecha_creacion")
+    updated_at: datetime = Field(alias="fecha_actualizacion")
+
+
+class ShipmentUpdate(ShipmentPayloadBase):
+    status: str | None = Field(default=None, alias="estado")
+
+    @field_validator("status")
+    @classmethod
+    def normalize_status(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        status = value.strip().upper() if value else ""
+        if status not in SHIPMENT_STATUS_VALUES:
+            raise ValueError("status must be one of the allowed shipment states")
+        return status
+
+
+class ShipmentPreRegistrationResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: int
+    shipment_code: str = Field(alias="codigo_encomienda")
+    status: str = Field(alias="estado")
+    registration_origin: str = Field(alias="origen_registro")
+    message: str = Field(alias="mensaje")
+
+
+class ShipmentCancelRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    reason: str = Field(alias="motivo")
+
+    @field_validator("reason")
+    @classmethod
+    def reason_is_required(cls, value: str) -> str:
+        if not value or not value.strip():
+            raise ValueError("motivo is required")
+        return value.strip()
+
+
+class ShipmentDeleteResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    success: bool
+    message: str
+    id: int
+    shipment_code: str = Field(alias="codigo_encomienda")
+    status: str = Field(alias="estado")
+    cancellation_reason: str | None = Field(default=None, alias="motivo_anulacion")
+    canceled_at: datetime | None = Field(default=None, alias="fecha_anulacion")
+    charge_reversal: str = Field(default="PENDIENTE_NO_INTEGRADO", alias="reversion_cobro")
+
+
+class LabelQrPayload(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    shipment_code: str = Field(alias="codigo_encomienda")
+    origin: str = Field(alias="origen")
+    destination: str = Field(alias="destino")
+    tracking: str
+
+
+class ShipmentLabelResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    shipment_code: str = Field(alias="codigo_encomienda")
+    origin: str = Field(alias="origen")
+    destination: str = Field(alias="destino")
+    sender: str = Field(alias="remitente")
+    recipient: str = Field(alias="destinatario")
+    qr_payload: LabelQrPayload
+
+
+class DeliveryRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    receiver_document: str = Field(alias="dni_receptor")
+    security_key: str | None = Field(default=None, alias="clave_seguridad")
+    signature_base64: str | None = Field(default=None, alias="firma_base64")
+
+    @field_validator("receiver_document")
+    @classmethod
+    def receiver_document_is_required(cls, value: str) -> str:
+        if not value or not value.strip():
+            raise ValueError("dni_receptor is required")
+        return value.strip()
+
+    @field_validator("security_key", "signature_base64")
+    @classmethod
+    def normalize_optional_delivery_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+
+class DeliveryResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    success: bool
+    message: str
+    id: int
+    shipment_code: str = Field(alias="codigo_encomienda")
+    status: str = Field(alias="estado")
+    delivered_at: datetime = Field(alias="fecha_entrega")
+    receiver_document: str = Field(alias="dni_receptor_entrega")
+    signature_saved: bool = Field(alias="firma_guardada")
