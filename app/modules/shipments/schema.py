@@ -1,11 +1,15 @@
 from datetime import datetime
+import math
+import re
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.modules.shipments.constants import (
     FRAGILITY_VALUES,
     SHIPMENT_STATUS_VALUES,
 )
+
+EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 
 
 class ShipmentPayloadBase(BaseModel):
@@ -16,12 +20,14 @@ class ShipmentPayloadBase(BaseModel):
     sender_name: str = Field(alias="remitente_nombre")
     sender_address: str | None = Field(default=None, alias="remitente_direccion")
     sender_phone: str | None = Field(default=None, alias="remitente_telefono")
+    sender_email: str | None = Field(default=None, alias="remitente_correo")
 
     recipient_document_type: str | None = Field(default=None, alias="destinatario_tipo_documento")
     recipient_document_number: str | None = Field(default=None, alias="destinatario_numero_documento")
     recipient_name: str = Field(alias="destinatario_nombre")
     recipient_address: str | None = Field(default=None, alias="destinatario_direccion")
     recipient_phone: str | None = Field(default=None, alias="destinatario_telefono")
+    recipient_email: str | None = Field(default=None, alias="destinatario_correo")
 
     origin: str = Field(default="Trujillo", alias="origen")
     destination: str = Field(alias="destino")
@@ -50,9 +56,11 @@ class ShipmentPayloadBase(BaseModel):
     @field_validator(
         "sender_address",
         "sender_phone",
+        "sender_email",
         "recipient_document_number",
         "recipient_address",
         "recipient_phone",
+        "recipient_email",
     )
     @classmethod
     def normalize_optional_text(cls, value: str | None) -> str | None:
@@ -69,10 +77,31 @@ class ShipmentPayloadBase(BaseModel):
         normalized = value.strip()
         return normalized.upper() if normalized else None
 
+    @field_validator("sender_phone", "recipient_phone")
+    @classmethod
+    def validate_phone(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if not value.isdigit():
+            raise ValueError("phone must contain only numbers")
+        if len(value) != 9:
+            raise ValueError("phone must have exactly 9 digits")
+        return value
+
+    @field_validator("sender_email", "recipient_email")
+    @classmethod
+    def validate_email(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        email = value.strip().lower()
+        if not EMAIL_PATTERN.fullmatch(email):
+            raise ValueError("email must be valid")
+        return email
+
     @field_validator("weight_kg", "length_cm", "width_cm", "height_cm")
     @classmethod
     def dimensions_must_be_positive(cls, value: float) -> float:
-        if value <= 0:
+        if not math.isfinite(value) or value <= 0:
             raise ValueError("weight_kg, length_cm, width_cm and height_cm must be greater than 0")
         return value
 
@@ -83,6 +112,27 @@ class ShipmentPayloadBase(BaseModel):
         if fragility not in FRAGILITY_VALUES:
             raise ValueError("fragility must be BAJA, MEDIA or ALTA")
         return fragility
+
+    @field_validator("content_type")
+    @classmethod
+    def normalize_content_type(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip().upper()
+        if not normalized:
+            raise ValueError("tipo_contenido cannot be empty")
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_document_numbers(self):
+        _validate_document_number(self.sender_document_type, self.sender_document_number, "remitente_numero_documento")
+        if self.recipient_document_number:
+            _validate_document_number(
+                self.recipient_document_type,
+                self.recipient_document_number,
+                "destinatario_numero_documento",
+            )
+        return self
 
 
 class ShipmentCreate(ShipmentPayloadBase):
@@ -205,16 +255,24 @@ class ShipmentLabelResponse(BaseModel):
 class DeliveryRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
-    receiver_document: str = Field(alias="dni_receptor")
+    receiver_document: str = Field(
+        validation_alias=AliasChoices("dni_receptor", "dni_receptor_entrega"),
+        serialization_alias="dni_receptor",
+    )
     security_key: str | None = Field(default=None, alias="clave_seguridad")
     signature_base64: str | None = Field(default=None, alias="firma_base64")
 
     @field_validator("receiver_document")
     @classmethod
     def receiver_document_is_required(cls, value: str) -> str:
-        if not value or not value.strip():
+        document = value.strip() if value else ""
+        if not document:
             raise ValueError("dni_receptor is required")
-        return value.strip()
+        if not document.isdigit():
+            raise ValueError("dni_receptor must contain only numbers")
+        if len(document) != 8:
+            raise ValueError("dni_receptor must have exactly 8 digits")
+        return document
 
     @field_validator("security_key", "signature_base64")
     @classmethod
@@ -236,3 +294,14 @@ class DeliveryResponse(BaseModel):
     delivered_at: datetime = Field(alias="fecha_entrega")
     receiver_document: str = Field(alias="dni_receptor_entrega")
     signature_saved: bool = Field(alias="firma_guardada")
+
+
+def _validate_document_number(document_type: str | None, document_number: str | None, field_name: str) -> None:
+    document_type = (document_type or "").strip().upper()
+    document_number = (document_number or "").strip()
+    if document_type != "DNI":
+        return
+    if not document_number.isdigit():
+        raise ValueError(f"{field_name} must contain only numbers")
+    if len(document_number) != 8:
+        raise ValueError(f"{field_name} must have exactly 8 digits")

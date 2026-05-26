@@ -3,6 +3,7 @@ import json
 
 from sqlalchemy.orm import Session
 
+from app.modules.clients.service import upsert_client_from_person_data
 from app.modules.shipments import repository
 from app.modules.shipments.constants import (
     CANCELED_STATUS,
@@ -22,10 +23,12 @@ from app.modules.shipments.schema import (
 
 
 def create_shipment(db: Session, payload: ShipmentCreate) -> Shipment:
+    _upsert_clients_from_shipment_payload(db, payload)
     return repository.create_shipment(db, payload)
 
 
 def create_pre_registration(db: Session, payload: ShipmentPreRegistrationCreate) -> Shipment:
+    _upsert_clients_from_shipment_payload(db, payload)
     return repository.create_pre_registration(db, payload)
 
 
@@ -64,6 +67,7 @@ def update_shipment(db: Session, shipment_id: int, payload: ShipmentUpdate) -> S
         raise ValueError(f"No se puede editar una encomienda en estado {shipment.status}")
     if payload.status is not None and payload.status != shipment.status:
         raise ValueError("No se puede modificar el estado desde este endpoint")
+    _upsert_clients_from_shipment_payload(db, payload)
     return repository.update_shipment(db, shipment, payload)
 
 
@@ -215,3 +219,31 @@ def _truncate(value: str, max_length: int) -> str:
     if len(value) <= max_length:
         return value
     return f"{value[: max_length - 3]}..."
+
+
+def _upsert_clients_from_shipment_payload(
+    db: Session,
+    payload: ShipmentCreate | ShipmentPreRegistrationCreate | ShipmentUpdate,
+) -> None:
+    if _is_dni_document(getattr(payload, "sender_document_type", None)):
+        upsert_client_from_person_data(
+            db,
+            dni=getattr(payload, "sender_document_number", None),
+            nombre_completo=getattr(payload, "sender_name", None),
+            telefono=getattr(payload, "sender_phone", None),
+            correo=getattr(payload, "sender_email", None),
+            direccion=getattr(payload, "sender_address", None),
+        )
+    if _is_dni_document(getattr(payload, "recipient_document_type", None)):
+        upsert_client_from_person_data(
+            db,
+            dni=getattr(payload, "recipient_document_number", None),
+            nombre_completo=getattr(payload, "recipient_name", None),
+            telefono=getattr(payload, "recipient_phone", None),
+            correo=getattr(payload, "recipient_email", None),
+            direccion=getattr(payload, "recipient_address", None),
+        )
+
+
+def _is_dni_document(document_type: str | None) -> bool:
+    return bool(document_type and document_type.strip().upper() == "DNI")

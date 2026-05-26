@@ -285,3 +285,16 @@ No se modificaron:
 - `app/modules/yape/`
 
 SUNAT mock/beta se mantiene y solo se agregaron restricciones por estado.
+
+## Validaciones de datos
+
+Los formularios y endpoints de encomiendas aplican estas reglas:
+
+- DNI: 8 digitos numericos cuando el tipo de documento es `DNI`.
+- Telefono: 9 digitos numericos cuando se informa un celular.
+- Correo: formato valido si el campo se informa.
+- Peso y dimensiones: valores numericos mayores a 0.
+- Fragilidad: solo `BAJA`, `MEDIA` o `ALTA`.
+- Tipo de contenido: requerido en los formularios actuales y no debe enviarse vacio.
+
+Estas validaciones son de entrada; no cambian estructura de base de datos ni requieren migraciones.
