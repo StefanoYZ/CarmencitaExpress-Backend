@@ -28,8 +28,9 @@ def get_db() -> Generator[Session, None, None]:
 def create_db_tables() -> None:
     # Temporal en desarrollo: crea tablas automaticamente.
     # En una fase posterior se reemplazara por Alembic con una migracion inicial.
-    from app.modules.shipments import model  # noqa: F401
-    from app.modules.users import model  # noqa: F401
+    from app.modules.clients import model as clients_model  # noqa: F401
+    from app.modules.shipments import model as shipments_model  # noqa: F401
+    from app.modules.users import model as users_model  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
     sync_development_schema()
