@@ -39,7 +39,10 @@ PROTECTED_UPDATE_FIELDS = {
     "delivery_receiver_document",
     "digital_signature_base64",
     "security_key",
+    "sender_email",
+    "recipient_email",
 }
+NON_PERSISTED_PAYLOAD_FIELDS = {"sender_email", "recipient_email"}
 
 
 def generate_shipment_code(db: Session) -> str:
@@ -59,7 +62,7 @@ def create_shipment(db: Session, shipment_data: ShipmentCreate) -> Shipment:
         shipment_code=generate_shipment_code(db),
         status=REGISTERED_STATUS,
         registration_origin=INTERNAL_REGISTRATION_ORIGIN,
-        **shipment_data.model_dump(exclude={"status"}),
+        **shipment_data.model_dump(exclude={"status", *NON_PERSISTED_PAYLOAD_FIELDS}),
     )
     return _commit_new_shipment_with_code_retry(db, shipment)
 
@@ -69,7 +72,7 @@ def create_pre_registration(db: Session, shipment_data: ShipmentPreRegistrationC
         shipment_code=generate_shipment_code(db),
         status=PRE_REGISTERED_STATUS,
         registration_origin=EXTERNAL_REGISTRATION_ORIGIN,
-        **shipment_data.model_dump(exclude={"status"}),
+        **shipment_data.model_dump(exclude={"status", *NON_PERSISTED_PAYLOAD_FIELDS}),
     )
     return _commit_new_shipment_with_code_retry(db, shipment)
 

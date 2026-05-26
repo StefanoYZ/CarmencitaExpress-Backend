@@ -202,6 +202,19 @@ LYCET_API_URL=http://localhost:8001
 LYCET_CLIENT_TOKEN=...
 ```
 
+## Validaciones de datos
+
+Las rutas de encomiendas validan la entrada antes de crear, actualizar o entregar registros:
+
+- DNI: cuando el tipo de documento es `DNI`, el numero debe contener solo digitos y tener exactamente 8 caracteres.
+- Telefono/celular: si se envia, debe contener solo digitos y tener exactamente 9 caracteres.
+- Correo: si se envia en el payload, debe tener formato valido (`usuario@dominio.com`).
+- Peso y dimensiones: `peso_kg`, `largo_cm`, `ancho_cm` y `alto_cm` deben ser numeros mayores a 0.
+- Fragilidad: debe ser `BAJA`, `MEDIA` o `ALTA`.
+- Tipo de contenido: si se envia, no puede estar vacio.
+
+FastAPI/Pydantic responde `422` cuando el payload no cumple estas reglas.
+
 Endpoints:
 
 ```text
