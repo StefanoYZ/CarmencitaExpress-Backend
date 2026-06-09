@@ -32,14 +32,6 @@ def ordered_packages(limit: int = 50) -> list[Package]:
 
 
 def run_first_fit(request: RunRequest) -> SimulationResponse:
-    return _run_packing(request=request, algorithm="FIRST_FIT_3D", strategy=None)
-
-
-def run_minimax_maximin(request: RunRequest) -> SimulationResponse:
-    return _run_packing(request=request, algorithm="MINIMAX_MAXIMIN_3D", strategy=request.strategy)
-
-
-def _run_packing(request: RunRequest, algorithm: str, strategy: str | None) -> SimulationResponse:
     truck = get_truck(request.truck_id)
     if not truck:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Camion no encontrado para la PoC.")
@@ -52,7 +44,7 @@ def _run_packing(request: RunRequest, algorithm: str, strategy: str | None) -> S
         if not is_weight_allowed(total_weight, package.peso_kg, truck):
             unplaced.append(package)
             continue
-        placement = _find_placement(package=package, truck=truck, placed=placements, sequence=len(placements) + 1, allow_rotation=request.allow_rotation, algorithm=algorithm, strategy=strategy)
+        placement = _find_first_fit(package=package, truck=truck, placed=placements, sequence=len(placements) + 1, allow_rotation=request.allow_rotation)
         if placement:
             placements.append(placement)
             total_weight += package.peso_kg
@@ -60,24 +52,16 @@ def _run_packing(request: RunRequest, algorithm: str, strategy: str | None) -> S
             unplaced.append(package)
     execution_ms = max(1, round((perf_counter() - started) * 1000))
     metrics = calculate_metrics(truck=truck, ordered_packages=packages, placements=placements, unplaced_packages=unplaced, execution_ms=execution_ms)
-    return SimulationResponse(simulation_id=f"poc-{uuid4().hex[:8]}", algorithm=algorithm, strategy=strategy, truck=truck, input_count=len(packages), ordered_packages=packages, placements=placements, unplaced_packages=unplaced, metrics=metrics)
+    return SimulationResponse(simulation_id=f"poc-{uuid4().hex[:8]}", algorithm="FIRST_FIT_3D", strategy=None, truck=truck, input_count=len(packages), ordered_packages=packages, placements=placements, unplaced_packages=unplaced, metrics=metrics)
 
 
-def _find_placement(*, package: Package, truck: Truck, placed: list[Placement], sequence: int, allow_rotation: bool, algorithm: str, strategy: str | None) -> Placement | None:
-    valid: list[Placement] = []
+def _find_first_fit(*, package: Package, truck: Truck, placed: list[Placement], sequence: int, allow_rotation: bool) -> Placement | None:
     for x, y, z in _candidate_points(placed):
         for width, height, depth, orientation in _orientations(package, allow_rotation):
             candidate = Placement(package_id=package.id, codigo=package.codigo, loading_sequence=sequence, delivery_order=package.orden_entrega, x=x, y=y, z=z, width=width, height=height, depth=depth, orientation=orientation, destination=package.destino, fragility=package.fragilidad, peso_kg=package.peso_kg, descripcion=package.descripcion)
-            if not _is_valid(candidate, truck, placed):
-                continue
-            if algorithm == "FIRST_FIT_3D":
+            if _is_valid(candidate, truck, placed):
                 return candidate
-            valid.append(candidate)
-    if not valid:
-        return None
-    if strategy == "MAXIMIN":
-        return max(valid, key=lambda candidate: _maximin_score(candidate, truck, placed))
-    return min(valid, key=lambda candidate: _minimax_penalty(candidate, truck, placed))
+    return None
 
 
 def _candidate_points(placed: list[Placement]) -> list[tuple[float, float, float]]:
@@ -106,20 +90,3 @@ def _orientations(package: Package, allow_rotation: bool) -> list[tuple[float, f
 
 def _is_valid(candidate: Placement, truck: Truck, placed: list[Placement]) -> bool:
     return is_inside_truck(candidate.x, candidate.y, candidate.z, candidate.width, candidate.height, candidate.depth, truck) and not has_overlap(candidate, placed) and has_minimum_support(candidate, placed) and respects_fragility(candidate, placed)
-
-
-def _minimax_penalty(candidate: Placement, truck: Truck, placed: list[Placement]) -> tuple[float, float, float, float]:
-    space_waste = (candidate.x + candidate.width) / truck.ancho_cm
-    height_penalty = (candidate.y + candidate.height) / truck.alto_cm
-    door_penalty = candidate.z / truck.largo_cm
-    support_penalty = 0.0 if has_minimum_support(candidate, placed) else 1.0
-    worst = max(space_waste, height_penalty, door_penalty, support_penalty)
-    return (worst, door_penalty, height_penalty, candidate.x)
-
-
-def _maximin_score(candidate: Placement, truck: Truck, placed: list[Placement]) -> tuple[float, float, float]:
-    support = 1.0 if has_minimum_support(candidate, placed) else 0.0
-    compactness = 1.0 - ((candidate.x + candidate.width) / truck.ancho_cm * 0.35 + (candidate.z + candidate.depth) / truck.largo_cm * 0.65)
-    accessibility = 1.0 - (candidate.z / truck.largo_cm)
-    stability = 1.0 - (candidate.y / truck.alto_cm)
-    return (min(support, compactness, accessibility, stability), accessibility, compactness)
