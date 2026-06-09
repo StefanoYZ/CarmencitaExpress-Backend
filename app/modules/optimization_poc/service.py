@@ -31,9 +31,6 @@ def ordered_packages(limit: int = 50) -> list[Package]:
     return sorted(packages, key=lambda item: (item.orden_entrega, item.prioridad, FRAGILITY_ORDER.get(item.fragilidad, 9), -(item.largo_cm * item.ancho_cm * item.alto_cm), item.codigo))
 
 
-def run_first_fit(request: RunRequest) -> SimulationResponse:
-    return _run_packing(request=request, algorithm="FIRST_FIT_3D", strategy=None)
-
 
 def run_minimax_maximin(request: RunRequest) -> SimulationResponse:
     return _run_packing(request=request, algorithm="MINIMAX_MAXIMIN_3D", strategy=request.strategy)
@@ -70,8 +67,6 @@ def _find_placement(*, package: Package, truck: Truck, placed: list[Placement], 
             candidate = Placement(package_id=package.id, codigo=package.codigo, loading_sequence=sequence, delivery_order=package.orden_entrega, x=x, y=y, z=z, width=width, height=height, depth=depth, orientation=orientation, destination=package.destino, fragility=package.fragilidad, peso_kg=package.peso_kg, descripcion=package.descripcion)
             if not _is_valid(candidate, truck, placed):
                 continue
-            if algorithm == "FIRST_FIT_3D":
-                return candidate
             valid.append(candidate)
     if not valid:
         return None
