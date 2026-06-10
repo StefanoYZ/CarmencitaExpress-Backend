@@ -51,7 +51,9 @@ def ordered_packages(limit: int = 50) -> list[Package]:
     return sorted(packages, key=lambda item: (-_destination_rank(item), item.prioridad, FRAGILITY_ORDER.get(item.fragilidad, 9), -(item.largo_cm * item.ancho_cm * item.alto_cm), item.codigo))
 
 
+
 def run_first_fit(request: RunRequest) -> SimulationResponse:
+
     truck = get_truck(request.truck_id)
     if not truck:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Camion no encontrado para la PoC.")
@@ -80,9 +82,11 @@ def _find_first_fit(*, package: Package, truck: Truck, placed: list[Placement], 
     for width, height, depth, orientation in _orientations(package, allow_rotation):
         for x, y, z in _candidate_points(placed, zone, depth):
             candidate = Placement(package_id=package.id, codigo=package.codigo, loading_sequence=sequence, delivery_order=package.orden_entrega, x=x, y=y, z=z, width=width, height=height, depth=depth, orientation=orientation, destination=package.destino, fragility=package.fragilidad, peso_kg=package.peso_kg, descripcion=package.descripcion)
+
             if _is_valid(candidate, truck, placed, zone):
                 return candidate
     return None
+
 
 
 def _candidate_points(placed: list[Placement], zone: dict[str, float | str], depth: float) -> list[tuple[float, float, float]]:
