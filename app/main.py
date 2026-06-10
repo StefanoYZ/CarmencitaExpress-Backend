@@ -5,6 +5,7 @@ from app.core.database import SessionLocal, create_db_tables
 from app.core.config import settings
 from app.modules.auth.router import router as auth_router
 from app.modules.clients.router import router as clients_router
+from app.modules.optimization_poc.router import router as optimization_poc_router
 from app.modules.payments.router import router as payments_router
 from app.modules.quotes.router import router as quotes_router
 from app.modules.reniec.router import router as reniec_router
@@ -36,6 +37,7 @@ app.include_router(sunat_router, prefix=settings.api_prefix)
 app.include_router(reniec_router, prefix=settings.api_prefix)
 app.include_router(payments_router, prefix=settings.api_prefix)
 app.include_router(yape_router, prefix=settings.api_prefix)
+app.include_router(optimization_poc_router, prefix=settings.api_prefix)
 
 
 @app.on_event("startup")
