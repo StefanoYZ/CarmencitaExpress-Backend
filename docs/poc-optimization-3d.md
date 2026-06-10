@@ -12,7 +12,7 @@ Esta prueba de concepto evalua algoritmos de acomodo de paquetes en un camion pa
 
 El dataset comun vive en `app/modules/optimization_poc/fixtures/packages_50.json` y contiene 50 paquetes. Los camiones estan en `trucks.json`:
 
-- Camion A: 600 x 240 x 240 cm, 5000 kg.
+- Camion A: 600 x 300 x 250 cm, 5000 kg.
 - Camion B: 500 x 220 x 220 cm, 3500 kg.
 
 La lista inicial se desordena con semilla fija `2026`. El ordenamiento logistico usa orden de entrega, prioridad, fragilidad, volumen descendente y codigo.
