@@ -1,7 +1,7 @@
 ﻿from app.modules.optimization_poc.schema import Placement, Truck
 
-SUPPORT_RATIO = 0.6
-EDGE_SUPPORT_RATIO = 0.12
+SUPPORT_RATIO = 0.78
+EDGE_SUPPORT_RATIO = 0.15
 FRAGILITY_SUPPORT_FACTOR = {
     "ALTA": 0.0,
     "MEDIA": 0.5,
