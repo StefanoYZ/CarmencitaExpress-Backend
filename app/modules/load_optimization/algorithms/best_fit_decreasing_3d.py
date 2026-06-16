@@ -3,7 +3,6 @@ import time
 from app.modules.load_optimization.utils.geometry import (
     create_initial_space,
     fits_dimensions_in_space,
-    generate_rotations,
     split_space,
     space_volume,
 )
@@ -95,52 +94,28 @@ def build_destination_priority(
 
 
 def get_destination_priority(destination: str, destination_priority: dict) -> int:
-    return destination_priority.get(normalize_text(destination), 99)
+    return destination_priority.get(normalize_text(destination), 0)
 
 
+# Compatibilidad con backtracking si todavía importa estas funciones.
 def get_destination_zone(destination: str, truck, destination_priority: dict) -> dict:
-    destination = normalize_text(destination)
-
-    zone_length = truck.length / 3
-    priority = destination_priority.get(destination)
-
-    if priority is None:
-        return {
-            "start_z": 0,
-            "end_z": truck.length,
-            "label": "ZONA_GENERAL"
-        }
-
-    max_priority = max(destination_priority.values())
-
-    if max_priority <= 0:
-        return {
-            "start_z": 0,
-            "end_z": truck.length,
-            "label": "ZONA_GENERAL"
-        }
-
-    ratio = priority / max_priority
-
-    if ratio >= 0.67:
-        return {
-            "start_z": 0,
-            "end_z": zone_length,
-            "label": "ZONA_LEJANA"
-        }
-
-    if ratio >= 0.34:
-        return {
-            "start_z": zone_length,
-            "end_z": zone_length * 2,
-            "label": "ZONA_MEDIA"
-        }
-
     return {
-        "start_z": zone_length * 2,
+        "start_z": 0,
         "end_z": truck.length,
-        "label": "ZONA_CERCANA"
+        "label": "ZONA_NO_APLICA"
     }
+
+
+def get_space_zone(space: dict, placed_length: float, truck) -> dict:
+    return {
+        "start_z": 0,
+        "end_z": truck.length,
+        "label": "ZONA_NO_APLICA"
+    }
+
+
+def calculate_zone_distance_level(package_zone_label: str, candidate_zone_label: str) -> int:
+    return 0
 
 
 def space_overlaps_destination_zone(
@@ -150,10 +125,7 @@ def space_overlaps_destination_zone(
     truck,
     destination_priority: dict
 ) -> bool:
-    zone = get_destination_zone(destination, truck, destination_priority)
-    package_center_z = space["z"] + (placed_length / 2)
-
-    return zone["start_z"] <= package_center_z <= zone["end_z"]
+    return True
 
 
 def calculate_zone_distance_penalty(
@@ -163,13 +135,65 @@ def calculate_zone_distance_penalty(
     truck,
     destination_priority: dict
 ) -> float:
-    zone = get_destination_zone(destination, truck, destination_priority)
-    zone_center = (zone["start_z"] + zone["end_z"]) / 2
-    package_center = space["z"] + (placed_length / 2)
+    return 0
 
-    distance = abs(package_center - zone_center)
 
-    return distance * truck.width * truck.height
+def get_rotation_policy_label(package) -> str:
+    fragility = normalize_text(package.fragility)
+    content_type = normalize_text(package.content_type)
+
+    if fragility == "ALTA":
+        return "Sin rotación por fragilidad alta"
+
+    if content_type in ["VIDRIO", "FRAGIL", "LÍQUIDO", "LIQUIDO"]:
+        return "Sin rotación por tipo de contenido"
+
+    if fragility == "MEDIA":
+        return "Rotación horizontal permitida"
+
+    if content_type in ["ARTEFACTO", "ELECTRONICO", "ELECTRÓNICO"]:
+        return "Rotación horizontal permitida por contenido"
+
+    return "Todas las rotaciones permitidas"
+
+
+def generate_allowed_rotations(package) -> list:
+    width = package.width
+    height = package.height
+    length = package.length
+
+    fragility = normalize_text(package.fragility)
+    content_type = normalize_text(package.content_type)
+
+    original = (width, height, length)
+
+    horizontal_rotations = [
+        (width, height, length),
+        (length, height, width),
+    ]
+
+    all_rotations = [
+        (width, height, length),
+        (width, length, height),
+        (height, width, length),
+        (height, length, width),
+        (length, width, height),
+        (length, height, width),
+    ]
+
+    if fragility == "ALTA":
+        return [original]
+
+    if content_type in ["VIDRIO", "FRAGIL", "LÍQUIDO", "LIQUIDO"]:
+        return [original]
+
+    if fragility == "MEDIA":
+        return list(dict.fromkeys(horizontal_rotations))
+
+    if content_type in ["ARTEFACTO", "ELECTRONICO", "ELECTRÓNICO"]:
+        return list(dict.fromkeys(horizontal_rotations))
+
+    return list(dict.fromkeys(all_rotations))
 
 
 def sort_free_spaces_by_logistic_order(free_spaces: list) -> list:
@@ -355,6 +379,70 @@ def evaluate_candidate_spaces(
     return valid_spaces, rejection_summary
 
 
+def select_best_option(
+    package,
+    free_spaces: list,
+    placed_packages: list
+):
+    best_option = None
+
+    package_rejection_summary = {
+        "dimension_rejections": 0,
+        "stacking_rejections": 0,
+        "stability_rejections": 0
+    }
+
+    for rotation in generate_allowed_rotations(package):
+        rotated_width, rotated_height, rotated_length = rotation
+        rotated_volume = rotated_width * rotated_height * rotated_length
+
+        candidate_spaces, rejection_summary = evaluate_candidate_spaces(
+            free_spaces=free_spaces,
+            rotated_width=rotated_width,
+            rotated_height=rotated_height,
+            rotated_length=rotated_length,
+            package=package,
+            placed_packages=placed_packages
+        )
+
+        for key in package_rejection_summary:
+            package_rejection_summary[key] += rejection_summary[key]
+
+        for candidate_space in candidate_spaces:
+            remaining_volume = space_volume(candidate_space) - rotated_volume
+
+            support_ratio = calculate_support_ratio(
+                candidate_space,
+                rotated_width,
+                rotated_length,
+                placed_packages
+            )
+
+            option = {
+                "space": candidate_space,
+                "width": rotated_width,
+                "height": rotated_height,
+                "length": rotated_length,
+                "volume": rotated_volume,
+                "remaining_volume": remaining_volume,
+                "optimization_score": remaining_volume,
+                "support_ratio": support_ratio,
+                "stacking_constraint_satisfied": True,
+                "stability_constraint_satisfied": (
+                    support_ratio >= MIN_SUPPORT_RATIO
+                )
+            }
+
+            if (
+                best_option is None
+                or option["optimization_score"]
+                < best_option["optimization_score"]
+            ):
+                best_option = option
+
+    return best_option, package_rejection_summary
+
+
 def get_unplaced_reason_data(rejection_summary: dict) -> dict:
     if rejection_summary["stability_rejections"] > 0:
         return {
@@ -378,6 +466,97 @@ def get_unplaced_reason_data(rejection_summary: dict) -> dict:
         "reason_code": "NO_SPACE",
         "reason": "No hay espacio disponible"
     }
+
+
+def build_placed_package(
+    package,
+    selected_option,
+    destination_priority: dict,
+    reinsertion_applied: bool = False
+) -> dict:
+    selected_space = selected_option["space"]
+
+    placed_width = selected_option["width"]
+    placed_height = selected_option["height"]
+    placed_length = selected_option["length"]
+
+    stacking_capacity = calculate_stacking_capacity({
+        "fragility": package.fragility,
+        "weight": package.weight
+    })
+
+    return {
+        "id": package.id,
+        "x": selected_space["x"],
+        "y": selected_space["y"],
+        "z": selected_space["z"],
+        "width": placed_width,
+        "height": placed_height,
+        "length": placed_length,
+        "original_width": package.width,
+        "original_height": package.height,
+        "original_length": package.length,
+        "weight": package.weight,
+        "fragility": package.fragility,
+        "destination": package.destination,
+        "destination_priority": get_destination_priority(
+            package.destination,
+            destination_priority
+        ),
+        "destination_zone": None,
+        "candidate_zone": None,
+        "zone_distance_level": None,
+        "inside_destination_zone": None,
+        "stacking_capacity": stacking_capacity,
+        "stacking_constraint_satisfied": selected_option[
+            "stacking_constraint_satisfied"
+        ],
+        "support_ratio": selected_option["support_ratio"],
+        "minimum_support_ratio_required": MIN_SUPPORT_RATIO,
+        "stability_constraint_satisfied": selected_option[
+            "stability_constraint_satisfied"
+        ],
+        "content_type": package.content_type,
+        "rotation_policy": get_rotation_policy_label(package),
+        "reinsertion_applied": reinsertion_applied,
+        "rotated": (
+            placed_width != package.width
+            or placed_height != package.height
+            or placed_length != package.length
+        )
+    }
+
+
+def apply_selected_option(
+    package,
+    selected_option,
+    destination_priority: dict,
+    placed_packages: list,
+    free_spaces: list,
+    reinsertion_applied: bool = False
+) -> dict:
+    placed_package = build_placed_package(
+        package,
+        selected_option,
+        destination_priority,
+        reinsertion_applied
+    )
+
+    placed_packages.append(placed_package)
+
+    selected_space = selected_option["space"]
+
+    free_spaces.remove(selected_space)
+    free_spaces.extend(
+        split_space(
+            selected_space,
+            selected_option["width"],
+            selected_option["height"],
+            selected_option["length"]
+        )
+    )
+
+    return placed_package
 
 
 def best_fit_decreasing_3d_algorithm(
@@ -416,197 +595,105 @@ def best_fit_decreasing_3d_algorithm(
     free_spaces = [create_initial_space(truck)]
 
     placed_packages = []
-    unplaced_packages = []
+    unplaced_candidates = []
 
     used_volume = 0
     total_weight = 0
 
     for package in sorted_packages:
         if total_weight + package.weight > truck.max_weight:
-            unplaced_packages.append({
-                "id": package.id,
+            unplaced_candidates.append({
+                "package": package,
                 "reason_code": "WEIGHT_LIMIT",
-                "reason": "Excede el peso máximo del camión"
+                "reason": "Excede el peso máximo del camión",
+                "rejection_summary": {
+                    "dimension_rejections": 0,
+                    "stacking_rejections": 0,
+                    "stability_rejections": 0
+                }
             })
             continue
 
-        best_option = None
-        fallback_option = None
-
-        package_rejection_summary = {
-            "dimension_rejections": 0,
-            "stacking_rejections": 0,
-            "stability_rejections": 0
-        }
-
-        for rotation in generate_rotations(package):
-            rotated_width, rotated_height, rotated_length = rotation
-            rotated_volume = rotated_width * rotated_height * rotated_length
-
-            candidate_spaces, rejection_summary = evaluate_candidate_spaces(
-                free_spaces=free_spaces,
-                rotated_width=rotated_width,
-                rotated_height=rotated_height,
-                rotated_length=rotated_length,
-                package=package,
-                placed_packages=placed_packages
-            )
-
-            for key in package_rejection_summary:
-                package_rejection_summary[key] += rejection_summary[key]
-
-            for candidate_space in candidate_spaces:
-                remaining_volume = space_volume(candidate_space) - rotated_volume
-
-                zone_penalty = calculate_zone_distance_penalty(
-                    candidate_space,
-                    rotated_length,
-                    package.destination,
-                    truck,
-                    destination_priority
-                )
-
-                optimization_score = remaining_volume + zone_penalty
-
-                inside_destination_zone = space_overlaps_destination_zone(
-                    candidate_space,
-                    rotated_length,
-                    package.destination,
-                    truck,
-                    destination_priority
-                )
-
-                support_ratio = calculate_support_ratio(
-                    candidate_space,
-                    rotated_width,
-                    rotated_length,
-                    placed_packages
-                )
-
-                option = {
-                    "space": candidate_space,
-                    "width": rotated_width,
-                    "height": rotated_height,
-                    "length": rotated_length,
-                    "volume": rotated_volume,
-                    "remaining_volume": remaining_volume,
-                    "zone_penalty": zone_penalty,
-                    "optimization_score": optimization_score,
-                    "inside_destination_zone": inside_destination_zone,
-                    "support_ratio": support_ratio,
-                    "stacking_constraint_satisfied": True,
-                    "stability_constraint_satisfied": (
-                        support_ratio >= MIN_SUPPORT_RATIO
-                    )
-                }
-
-                if inside_destination_zone:
-                    if (
-                        best_option is None
-                        or option["optimization_score"]
-                        < best_option["optimization_score"]
-                    ):
-                        best_option = option
-
-                if (
-                    fallback_option is None
-                    or option["optimization_score"]
-                    < fallback_option["optimization_score"]
-                ):
-                    fallback_option = option
-
-        selected_option = (
-            best_option
-            if best_option is not None
-            else fallback_option
+        selected_option, rejection_summary = select_best_option(
+            package,
+            free_spaces,
+            placed_packages
         )
 
         if selected_option is None:
-            reason_data = get_unplaced_reason_data(package_rejection_summary)
+            reason_data = get_unplaced_reason_data(rejection_summary)
 
-            unplaced_packages.append({
-                "id": package.id,
+            unplaced_candidates.append({
+                "package": package,
                 "reason_code": reason_data["reason_code"],
                 "reason": reason_data["reason"],
-                "rejection_summary": package_rejection_summary
+                "rejection_summary": rejection_summary
             })
             continue
 
-        selected_space = selected_option["space"]
-        placed_width = selected_option["width"]
-        placed_height = selected_option["height"]
-        placed_length = selected_option["length"]
-        placed_volume = selected_option["volume"]
-
-        destination_zone = get_destination_zone(
-            package.destination,
-            truck,
-            destination_priority
+        apply_selected_option(
+            package,
+            selected_option,
+            destination_priority,
+            placed_packages,
+            free_spaces,
+            reinsertion_applied=False
         )
 
-        stacking_capacity = calculate_stacking_capacity({
-            "fragility": package.fragility,
-            "weight": package.weight
-        })
-
-        placed_packages.append({
-            "id": package.id,
-            "x": selected_space["x"],
-            "y": selected_space["y"],
-            "z": selected_space["z"],
-            "width": placed_width,
-            "height": placed_height,
-            "length": placed_length,
-            "original_width": package.width,
-            "original_height": package.height,
-            "original_length": package.length,
-            "weight": package.weight,
-            "fragility": package.fragility,
-            "destination": package.destination,
-            "destination_priority": get_destination_priority(
-                package.destination,
-                destination_priority
-            ),
-            "destination_zone": destination_zone,
-            "inside_destination_zone": selected_option["inside_destination_zone"],
-            "stacking_capacity": stacking_capacity,
-            "stacking_constraint_satisfied": selected_option[
-                "stacking_constraint_satisfied"
-            ],
-            "support_ratio": selected_option["support_ratio"],
-            "minimum_support_ratio_required": MIN_SUPPORT_RATIO,
-            "stability_constraint_satisfied": selected_option[
-                "stability_constraint_satisfied"
-            ],
-            "content_type": package.content_type,
-            "rotated": (
-                placed_width != package.width
-                or placed_height != package.height
-                or placed_length != package.length
-            )
-        })
-
-        used_volume += placed_volume
+        used_volume += selected_option["volume"]
         total_weight += package.weight
 
-        free_spaces.remove(selected_space)
-        free_spaces.extend(
-            split_space(
-                selected_space,
-                placed_width,
-                placed_height,
-                placed_length
-            )
+    reinserted_count = 0
+    final_unplaced_packages = []
+
+    for item in sorted(
+        unplaced_candidates,
+        key=lambda data: data["package"].volume
+    ):
+        package = item["package"]
+
+        if total_weight + package.weight > truck.max_weight:
+            final_unplaced_packages.append({
+                "id": package.id,
+                "reason_code": "WEIGHT_LIMIT",
+                "reason": "Excede el peso máximo del camión",
+                "rejection_summary": item["rejection_summary"]
+            })
+            continue
+
+        selected_option, rejection_summary = select_best_option(
+            package,
+            free_spaces,
+            placed_packages
         )
+
+        if selected_option is None:
+            reason_data = get_unplaced_reason_data(rejection_summary)
+
+            final_unplaced_packages.append({
+                "id": package.id,
+                "reason_code": reason_data["reason_code"],
+                "reason": reason_data["reason"],
+                "rejection_summary": rejection_summary
+            })
+            continue
+
+        apply_selected_option(
+            package,
+            selected_option,
+            destination_priority,
+            placed_packages,
+            free_spaces,
+            reinsertion_applied=True
+        )
+
+        used_volume += selected_option["volume"]
+        total_weight += package.weight
+        reinserted_count += 1
 
     execution_time_ms = round(
         (time.perf_counter() - start_time) * 1000,
         3
-    )
-
-    zone_compliance_count = sum(
-        1 for package in placed_packages
-        if package["inside_destination_zone"]
     )
 
     stacking_compliance_count = sum(
@@ -618,11 +705,6 @@ def best_fit_decreasing_3d_algorithm(
         1 for package in placed_packages
         if package["stability_constraint_satisfied"]
     )
-
-    zone_compliance_percentage = round(
-        (zone_compliance_count / len(placed_packages)) * 100,
-        2
-    ) if placed_packages else 0
 
     stacking_compliance_percentage = round(
         (stacking_compliance_count / len(placed_packages)) * 100,
@@ -639,8 +721,13 @@ def best_fit_decreasing_3d_algorithm(
         "route": route,
         "origin_agency": origin_agency,
         "destination_order_applied": True,
-        "destination_zone_constraint_applied": True,
-        "destination_spatial_preference_applied": True,
+        "destination_zone_constraint_applied": False,
+        "destination_spatial_preference_applied": False,
+        "progressive_zone_usage_applied": False,
+        "space_utilization_priority_applied": True,
+        "controlled_rotation_applied": True,
+        "reinsertion_phase_applied": True,
+        "reinserted_count": reinserted_count,
         "stacking_constraint_applied": True,
         "stability_constraint_applied": True,
         "minimum_support_ratio_required": MIN_SUPPORT_RATIO,
@@ -649,10 +736,18 @@ def best_fit_decreasing_3d_algorithm(
             "MEDIA": "50% del peso del paquete",
             "BAJA": "200% del peso del paquete"
         },
+        "rotation_rule": {
+            "ALTA": "Sin rotación",
+            "MEDIA": "Solo rotación horizontal",
+            "BAJA": "Todas las rotaciones permitidas",
+            "VIDRIO": "Sin rotación",
+            "ARTEFACTO": "Solo rotación horizontal",
+            "ROPA": "Todas las rotaciones permitidas"
+        },
         "destination_priority": destination_priority,
         "unloading_assumption": UNLOADING_ASSUMPTION,
-        "zone_compliance_percentage": zone_compliance_percentage,
-        "zone_compliance_count": zone_compliance_count,
+        "zone_compliance_percentage": None,
+        "zone_compliance_count": None,
         "stacking_compliance_percentage": stacking_compliance_percentage,
         "stacking_compliance_count": stacking_compliance_count,
         "stability_compliance_percentage": stability_compliance_percentage,
@@ -667,7 +762,7 @@ def best_fit_decreasing_3d_algorithm(
         ),
         "success_rate": calculate_success_rate(
             placed_packages,
-            unplaced_packages
+            final_unplaced_packages
         ),
         "execution_time_ms": execution_time_ms,
         "used_volume": used_volume,
@@ -675,7 +770,7 @@ def best_fit_decreasing_3d_algorithm(
         "total_weight": total_weight,
         "max_weight": truck.max_weight,
         "placed_count": len(placed_packages),
-        "unplaced_count": len(unplaced_packages),
+        "unplaced_count": len(final_unplaced_packages),
         "placed_packages": placed_packages,
-        "unplaced_packages": unplaced_packages,
+        "unplaced_packages": final_unplaced_packages,
     }
