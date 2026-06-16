@@ -13,7 +13,7 @@ from app.modules.sunat.router import router as sunat_router
 from app.modules.users.router import permissions_router, roles_router, users_router
 from app.modules.users.service import seed_initial_access_control
 from app.modules.yape.router import router as yape_router
-
+from app.modules.load_optimization.router import router as load_router
 app = FastAPI(title=settings.app_name)
 
 app.add_middleware(
@@ -36,7 +36,7 @@ app.include_router(sunat_router, prefix=settings.api_prefix)
 app.include_router(reniec_router, prefix=settings.api_prefix)
 app.include_router(payments_router, prefix=settings.api_prefix)
 app.include_router(yape_router, prefix=settings.api_prefix)
-
+app.include_router(load_router, prefix=settings.api_prefix)
 
 @app.on_event("startup")
 def startup() -> None:
