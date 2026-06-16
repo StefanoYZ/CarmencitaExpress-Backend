@@ -9,7 +9,7 @@ SHUFFLE_SEED = 2026
 
 
 def _load_json(name: str) -> list[dict]:
-    with (FIXTURE_DIR / name).open(encoding="utf-8") as file:
+    with (FIXTURE_DIR / name).open(encoding="utf-8-sig") as file:
         return json.load(file)
 
 

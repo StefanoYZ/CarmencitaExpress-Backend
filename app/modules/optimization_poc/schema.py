@@ -3,7 +3,7 @@
 from pydantic import BaseModel, ConfigDict, Field
 
 Fragility = Literal["BAJA", "MEDIA", "ALTA"]
-Algorithm = Literal["FIRST_FIT_3D", "MINIMAX_MAXIMIN_3D"]
+Algorithm = str
 Strategy = Literal["MINIMAX", "MAXIMIN"]
 
 
@@ -36,6 +36,8 @@ class RunRequest(BaseModel):
     package_limit: int = Field(default=50, ge=1, le=50)
     allow_rotation: bool = True
     strategy: Strategy = "MINIMAX"
+    route: str = "TRUJILLO_OROCULLAY"
+    origin_agency: str = "TRUJILLO"
 
 
 class Placement(BaseModel):
