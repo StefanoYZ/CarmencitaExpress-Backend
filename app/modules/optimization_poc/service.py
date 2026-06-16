@@ -1,15 +1,27 @@
-﻿from itertools import permutations
 from time import perf_counter
 from uuid import uuid4
 
 from fastapi import HTTPException, status
 
-from app.modules.optimization_poc.metrics import calculate_metrics
+from app.modules.optimization_poc.algorithms import (
+    BACKTRACKING_LOGISTIC,
+    BEST_FIT_3D,
+    BEST_FIT_DECREASING_3D,
+    FIRST_FIT_3D,
+    MAXIMIN,
+    MINIMAX,
+    MINIMAX_MAXIMIN_3D,
+    WORST_FIT,
+    get_packing_algorithm,
+)
+from app.modules.optimization_poc.algorithms.backtracking_3d import backtracking_3d_algorithm
+from app.modules.optimization_poc.algorithms.best_fit_decreasing_3d import best_fit_decreasing_3d_algorithm
+from app.modules.optimization_poc.algorithms.worst_fit import worst_fit_algorithm
+from app.modules.optimization_poc.models import Package3D, Truck3D
 from app.modules.optimization_poc.repository import get_truck, list_packages, list_trucks
-from app.modules.optimization_poc.schema import Package, Placement, RunRequest, ScenarioResponse, SimulationResponse, Truck
-from app.modules.optimization_poc.validators import has_minimum_support, has_overlap, is_inside_truck, is_weight_allowed, respects_fragility
-
-FRAGILITY_ORDER = {"ALTA": 0, "MEDIA": 1, "BAJA": 2}
+from app.modules.optimization_poc.schema import Package, Placement, RunRequest, ScenarioResponse, SimulationResponse
+from app.modules.optimization_poc.utils.metrics import calculate_metrics
+from app.modules.optimization_poc.validators import is_weight_allowed
 
 
 def get_scenario(limit: int = 50) -> ScenarioResponse:
@@ -26,95 +38,181 @@ def get_scenario(limit: int = 50) -> ScenarioResponse:
     )
 
 
-def ordered_packages(limit: int = 50) -> list[Package]:
-    packages = list_packages(limit=limit, shuffled=True)
-    return sorted(packages, key=lambda item: (item.orden_entrega, item.prioridad, FRAGILITY_ORDER.get(item.fragilidad, 9), -(item.largo_cm * item.ancho_cm * item.alto_cm), item.codigo))
+def ordered_packages(limit: int = 50, strategy: str = FIRST_FIT_3D) -> list[Package]:
+    packages = build_packages(list_packages(limit=limit, shuffled=False))
+    return [package.to_schema() for package in get_packing_algorithm(strategy).order_packages(packages)]
 
+
+def run_first_fit(request: RunRequest) -> SimulationResponse:
+    return _run_simulation(request, algorithm=FIRST_FIT_3D, strategy_id=FIRST_FIT_3D, strategy=None)
+
+
+def run_best_fit(request: RunRequest) -> SimulationResponse:
+    return _run_simulation(request, algorithm=BEST_FIT_3D, strategy_id=BEST_FIT_3D, strategy=None)
+
+
+def run_worst_fit(request: RunRequest) -> SimulationResponse:
+    return _run_logistic_simulation(request, algorithm=WORST_FIT, runner=worst_fit_algorithm)
+
+
+def run_best_fit_decreasing(request: RunRequest) -> SimulationResponse:
+    return _run_logistic_simulation(
+        request,
+        algorithm=BEST_FIT_DECREASING_3D,
+        runner=best_fit_decreasing_3d_algorithm,
+    )
+
+
+def run_backtracking_logistic(request: RunRequest) -> SimulationResponse:
+    return _run_logistic_simulation(
+        request,
+        algorithm=BACKTRACKING_LOGISTIC,
+        runner=backtracking_3d_algorithm,
+    )
 
 
 def run_minimax_maximin(request: RunRequest) -> SimulationResponse:
-    return _run_packing(request=request, algorithm="MINIMAX_MAXIMIN_3D", strategy=request.strategy)
+    strategy = (request.strategy or MINIMAX).upper()
+    if strategy not in {MINIMAX, MAXIMIN}:
+        strategy = MINIMAX
+    return _run_simulation(request, algorithm=MINIMAX_MAXIMIN_3D, strategy_id=strategy, strategy=strategy)
 
 
-def _run_packing(request: RunRequest, algorithm: str, strategy: str | None) -> SimulationResponse:
-    truck = get_truck(request.truck_id)
-    if not truck:
+def _run_simulation(
+    request: RunRequest,
+    *,
+    algorithm: str,
+    strategy_id: str,
+    strategy: str | None,
+) -> SimulationResponse:
+    truck_schema = get_truck(request.truck_id)
+    if not truck_schema:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Camion no encontrado para la PoC.")
-    packages = ordered_packages(limit=request.package_limit)
+
+    truck = build_truck(truck_schema)
+    packing_algorithm = get_packing_algorithm(strategy_id)
+    packages = packing_algorithm.order_packages(build_packages(list_packages(limit=request.package_limit, shuffled=False)))
     placements: list[Placement] = []
-    unplaced: list[Package] = []
+    unplaced: list[Package3D] = []
     total_weight = 0.0
     started = perf_counter()
+
     for package in packages:
         if not is_weight_allowed(total_weight, package.peso_kg, truck):
             unplaced.append(package)
             continue
-        placement = _find_placement(package=package, truck=truck, placed=placements, sequence=len(placements) + 1, allow_rotation=request.allow_rotation, algorithm=algorithm, strategy=strategy)
+
+        placement = packing_algorithm.find_placement(
+            package,
+            truck,
+            placements,
+            len(placements) + 1,
+            request.allow_rotation,
+        )
         if placement:
             placements.append(placement)
             total_weight += package.peso_kg
         else:
             unplaced.append(package)
+
     execution_ms = max(1, round((perf_counter() - started) * 1000))
-    metrics = calculate_metrics(truck=truck, ordered_packages=packages, placements=placements, unplaced_packages=unplaced, execution_ms=execution_ms)
-    return SimulationResponse(simulation_id=f"poc-{uuid4().hex[:8]}", algorithm=algorithm, strategy=strategy, truck=truck, input_count=len(packages), ordered_packages=packages, placements=placements, unplaced_packages=unplaced, metrics=metrics)
+    metrics = calculate_metrics(
+        truck=truck,
+        ordered_packages=packages,
+        placements=placements,
+        unplaced_packages=unplaced,
+        execution_ms=execution_ms,
+    )
+    return SimulationResponse(
+        simulation_id=f"poc-{uuid4().hex[:8]}",
+        algorithm=algorithm,
+        strategy=strategy,
+        truck=truck.to_schema(),
+        input_count=len(packages),
+        ordered_packages=[package.to_schema() for package in packages],
+        placements=placements,
+        unplaced_packages=[package.to_schema() for package in unplaced],
+        metrics=metrics,
+    )
 
 
-def _find_placement(*, package: Package, truck: Truck, placed: list[Placement], sequence: int, allow_rotation: bool, algorithm: str, strategy: str | None) -> Placement | None:
-    valid: list[Placement] = []
-    for x, y, z in _candidate_points(placed):
-        for width, height, depth, orientation in _orientations(package, allow_rotation):
-            candidate = Placement(package_id=package.id, codigo=package.codigo, loading_sequence=sequence, delivery_order=package.orden_entrega, x=x, y=y, z=z, width=width, height=height, depth=depth, orientation=orientation, destination=package.destino, fragility=package.fragilidad, peso_kg=package.peso_kg, descripcion=package.descripcion)
-            if not _is_valid(candidate, truck, placed):
-                continue
-            valid.append(candidate)
-    if not valid:
-        return None
-    if strategy == "MAXIMIN":
-        return max(valid, key=lambda candidate: _maximin_score(candidate, truck, placed))
-    return min(valid, key=lambda candidate: _minimax_penalty(candidate, truck, placed))
+def build_truck(truck) -> Truck3D:
+    return truck if isinstance(truck, Truck3D) else Truck3D.from_schema(truck)
 
 
-def _candidate_points(placed: list[Placement]) -> list[tuple[float, float, float]]:
-    points = {(0.0, 0.0, 0.0)}
-    for item in placed:
-        points.add((item.x + item.width, item.y, item.z))
-        points.add((item.x, item.y + item.height, item.z))
-        points.add((item.x, item.y, item.z + item.depth))
-    return sorted(points, key=lambda point: (point[2], point[1], point[0]))
+def build_packages(packages: list[Package]) -> list[Package3D]:
+    return [package if isinstance(package, Package3D) else Package3D.from_schema(package) for package in packages]
 
 
-def _orientations(package: Package, allow_rotation: bool) -> list[tuple[float, float, float, str]]:
-    base = (package.ancho_cm, package.alto_cm, package.largo_cm)
-    if not allow_rotation or not package.permite_rotacion:
-        return [(base[0], base[1], base[2], "LWH")]
-    orientations: list[tuple[float, float, float, str]] = []
-    seen = set()
-    labels = ["WHD", "WDH", "HWD", "HDW", "DWH", "DHW"]
-    for index, dims in enumerate(permutations(base, 3)):
-        if dims in seen:
-            continue
-        seen.add(dims)
-        orientations.append((dims[0], dims[1], dims[2], labels[min(index, len(labels) - 1)]))
-    return orientations
+def _run_logistic_simulation(
+    request: RunRequest,
+    *,
+    algorithm: str,
+    runner,
+) -> SimulationResponse:
+    truck_schema = get_truck(request.truck_id)
+    if not truck_schema:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Camion no encontrado para la PoC.")
 
+    truck = build_truck(truck_schema)
+    packages = build_packages(list_packages(limit=request.package_limit, shuffled=False))
+    result = runner(
+        truck,
+        packages,
+        route=request.route,
+        origin_agency=request.origin_agency,
+    )
 
-def _is_valid(candidate: Placement, truck: Truck, placed: list[Placement]) -> bool:
-    return is_inside_truck(candidate.x, candidate.y, candidate.z, candidate.width, candidate.height, candidate.depth, truck) and not has_overlap(candidate, placed) and has_minimum_support(candidate, placed) and respects_fragility(candidate, placed)
+    ordered_packages = result.get("ordered_packages") or packages
+    package_by_id = {package.id: package for package in ordered_packages}
+    placements: list[Placement] = []
 
+    for sequence, item in enumerate(result.get("placed_packages", []), start=1):
+        package = package_by_id[item["id"]]
+        placements.append(
+            Placement(
+                package_id=package.id,
+                codigo=package.codigo,
+                loading_sequence=sequence,
+                delivery_order=package.orden_entrega,
+                x=item["x"],
+                y=item["y"],
+                z=item["z"],
+                width=item["width"],
+                height=item["height"],
+                depth=item["length"],
+                orientation="ROT" if item.get("rotated") else "LWH",
+                destination=package.destino,
+                fragility=package.fragilidad,
+                peso_kg=package.peso_kg,
+                descripcion=package.descripcion,
+            )
+        )
 
-def _minimax_penalty(candidate: Placement, truck: Truck, placed: list[Placement]) -> tuple[float, float, float, float]:
-    space_waste = (candidate.x + candidate.width) / truck.ancho_cm
-    height_penalty = (candidate.y + candidate.height) / truck.alto_cm
-    door_penalty = candidate.z / truck.largo_cm
-    support_penalty = 0.0 if has_minimum_support(candidate, placed) else 1.0
-    worst = max(space_waste, height_penalty, door_penalty, support_penalty)
-    return (worst, door_penalty, height_penalty, candidate.x)
+    placed_ids = {item["id"] for item in result.get("placed_packages", [])}
+    unplaced_ids = [item["id"] for item in result.get("unplaced_packages", []) if item["id"] in package_by_id]
+    unplaced_packages = [package_by_id[item_id] for item_id in unplaced_ids]
 
+    if len(unplaced_packages) + len(placements) < len(ordered_packages):
+        known_ids = placed_ids | set(unplaced_ids)
+        unplaced_packages.extend(package for package in ordered_packages if package.id not in known_ids)
 
-def _maximin_score(candidate: Placement, truck: Truck, placed: list[Placement]) -> tuple[float, float, float]:
-    support = 1.0 if has_minimum_support(candidate, placed) else 0.0
-    compactness = 1.0 - ((candidate.x + candidate.width) / truck.ancho_cm * 0.35 + (candidate.z + candidate.depth) / truck.largo_cm * 0.65)
-    accessibility = 1.0 - (candidate.z / truck.largo_cm)
-    stability = 1.0 - (candidate.y / truck.alto_cm)
-    return (min(support, compactness, accessibility, stability), accessibility, compactness)
+    metrics = calculate_metrics(
+        truck=truck,
+        ordered_packages=ordered_packages,
+        placements=placements,
+        unplaced_packages=unplaced_packages,
+        execution_ms=max(1, round(float(result.get("execution_time_ms", 1)))),
+    )
+
+    return SimulationResponse(
+        simulation_id=f"poc-{uuid4().hex[:8]}",
+        algorithm=algorithm,
+        strategy=None,
+        truck=truck.to_schema(),
+        input_count=len(ordered_packages),
+        ordered_packages=[package.to_schema() for package in ordered_packages],
+        placements=placements,
+        unplaced_packages=[package.to_schema() for package in unplaced_packages],
+        metrics=metrics,
+    )
