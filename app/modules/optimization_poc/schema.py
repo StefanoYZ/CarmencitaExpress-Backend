@@ -33,7 +33,8 @@ class Truck(BaseModel):
 
 class RunRequest(BaseModel):
     truck_id: str = "CAMION_A"
-    package_limit: int = Field(default=50, ge=1, le=50)
+    package_limit: int = Field(default=20, ge=1, le=70)
+    package_codes: list[str] | None = None
     allow_rotation: bool = True
     strategy: Strategy = "MINIMAX"
     route: str = "TRUJILLO_OROCULLAY"
@@ -56,6 +57,9 @@ class Placement(BaseModel):
     fragility: Fragility
     peso_kg: float
     descripcion: str
+    supported_weight: float = 0.0
+    stacking_capacity: float = 0.0
+    support_ratio: float = 1.0
 
 
 class Metrics(BaseModel):

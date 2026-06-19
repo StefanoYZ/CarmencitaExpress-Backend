@@ -9,8 +9,9 @@ UNLOADING_ASSUMPTION = "Los destinos mas lejanos se cargan primero y se ubican a
 STACKING_FACTORS = {
     "ALTA": 0.0,
     "MEDIA": 0.5,
-    "BAJA": 2.0,
+    "BAJA": 1.5,
 }
+LOADING_FRONTIER_EPSILON_CM = 0.001
 
 
 def normalize_text(value: str) -> str:
@@ -83,7 +84,9 @@ def destination_target_z(
     priority = get_destination_priority(destination, destination_priority)
     max_priority = max(destination_priority.values(), default=1)
     available_depth = max(truck.length - length, 0.0)
-    return available_depth * (priority / max(max_priority, 1))
+    ratio = priority / max(max_priority, 1)
+    target_depth = truck.length * (1.0 - ratio)
+    return min(target_depth, available_depth)
 
 
 def space_overlaps_destination_zone(
@@ -223,30 +226,77 @@ def validate_stacking_constraint(
 
 
 def register_supported_weight(candidate_package: dict, placed_packages: list[dict]) -> None:
-    if candidate_package["y"] == 0:
-        return
+    all_packages = [*placed_packages, candidate_package]
+    for package in all_packages:
+        package["supported_weight"] = 0.0
+        package["stacking_capacity"] = calculate_stacking_capacity(package)
+        package["support_ratio"] = calculate_support_ratio(
+            package,
+            package["width"],
+            package["length"],
+            [item for item in all_packages if item is not package],
+        )
 
-    supports, total_support_area = support_distribution(
-        candidate_package,
-        candidate_package["width"],
-        candidate_package["length"],
-        placed_packages,
-    )
-    if total_support_area <= 0:
-        return
+    for package in sorted(all_packages, key=lambda item: item["y"], reverse=True):
+        if package["y"] == 0:
+            package["support_ratio"] = 1.0
+            continue
 
-    for support, overlap_area in supports:
-        carried_weight = candidate_package["weight"] * (overlap_area / total_support_area)
-        support["supported_weight"] = float(support.get("supported_weight", 0.0)) + carried_weight
+        supports, total_support_area = support_distribution(
+            package,
+            package["width"],
+            package["length"],
+            [item for item in all_packages if item is not package],
+        )
+        base_area = package["width"] * package["length"]
+        package["support_ratio"] = min(1.0, total_support_area / base_area) if base_area > 0 else 0.0
+        if total_support_area <= 0:
+            continue
+
+        transmitted_weight = float(package["weight"]) + float(package.get("supported_weight", 0.0))
+        for support, overlap_area in supports:
+            support["supported_weight"] = float(support.get("supported_weight", 0.0)) + (
+                transmitted_weight * (overlap_area / total_support_area)
+            )
 
 
 def sort_free_spaces(free_spaces: list[dict]) -> list[dict]:
     return sorted(
         free_spaces,
         key=lambda space: (
-            -(space["width"] * space["height"] * space["length"]),
-            space["y"],
             space["z"],
+            space["y"],
             space["x"],
+            -(space["width"] * space["height"] * space["length"]),
         ),
     )
+
+
+def filter_candidate_options_by_loading_frontier(
+    candidate_options: list[dict],
+    placed_packages: list[dict],
+) -> list[dict]:
+    if not candidate_options:
+        return []
+
+    min_accessible_z = (
+        placed_packages[-1]["z"]
+        if placed_packages
+        else 0.0
+    ) - LOADING_FRONTIER_EPSILON_CM
+
+    accessible_options = [
+        option
+        for option in candidate_options
+        if option["space"]["z"] >= min_accessible_z
+    ]
+    if not accessible_options:
+        return []
+
+    min_z = min(option["space"]["z"] for option in accessible_options)
+    frontier_z = min_z + LOADING_FRONTIER_EPSILON_CM
+    return [
+        option
+        for option in accessible_options
+        if option["space"]["z"] <= frontier_z
+    ]

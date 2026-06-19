@@ -159,6 +159,11 @@ class UserCreate(BaseModel):
             raise ValueError("The field cannot be empty")
         return value.strip()
 
+    @field_validator("full_name")
+    @classmethod
+    def normalize_full_name(cls, value: str) -> str:
+        return " ".join(value.strip().split())
+
     @field_validator("username")
     @classmethod
     def normalize_username(cls, value: str) -> str:
@@ -224,7 +229,7 @@ class UserUpdate(BaseModel):
             return None
         if not value.strip():
             raise ValueError("full_name cannot be empty")
-        return value.strip()
+        return " ".join(value.strip().split())
 
 
 class UserResponse(BaseModel):

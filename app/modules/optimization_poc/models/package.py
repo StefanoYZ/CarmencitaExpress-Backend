@@ -96,9 +96,9 @@ def package_sort_key(package: Package3D | Package, strategy: str) -> tuple[float
     stack_rank = STACK_PRIORITY.get(package.fragilidad, 9)
 
     if strategy == BEST_FIT_3D:
-        return (-volume, -footprint, -package.peso_kg, -route_rank, stack_rank, package.codigo)
+        return (-route_rank, package.prioridad, stack_rank, -volume, -footprint, -package.peso_kg, package.codigo)
     if strategy == MAXIMIN:
-        return (stack_rank, -footprint, -package.peso_kg, -route_rank, package.prioridad, -volume, package.codigo)
+        return (-route_rank, package.prioridad, stack_rank, -footprint, -package.peso_kg, -volume, package.codigo)
     if strategy == MINIMAX:
         return (-route_rank, -volume, -package.peso_kg, package.prioridad, stack_rank, package.codigo)
     return (-route_rank, package.prioridad, stack_rank, fragility_rank, -footprint, -volume, package.codigo)

@@ -23,12 +23,12 @@ from app.modules.shipments.schema import (
 
 
 def create_shipment(db: Session, payload: ShipmentCreate) -> Shipment:
-    _upsert_clients_from_shipment_payload(db, payload)
+    _upsert_clients_from_shipment_payload(db, payload, commit=False)
     return repository.create_shipment(db, payload)
 
 
 def create_pre_registration(db: Session, payload: ShipmentPreRegistrationCreate) -> Shipment:
-    _upsert_clients_from_shipment_payload(db, payload)
+    _upsert_clients_from_shipment_payload(db, payload, commit=False)
     return repository.create_pre_registration(db, payload)
 
 
@@ -67,7 +67,7 @@ def update_shipment(db: Session, shipment_id: int, payload: ShipmentUpdate) -> S
         raise ValueError(f"No se puede editar una encomienda en estado {shipment.status}")
     if payload.status is not None and payload.status != shipment.status:
         raise ValueError("No se puede modificar el estado desde este endpoint")
-    _upsert_clients_from_shipment_payload(db, payload)
+    _upsert_clients_from_shipment_payload(db, payload, commit=False)
     return repository.update_shipment(db, shipment, payload)
 
 
@@ -121,6 +121,7 @@ def generate_label_pdf(db: Session, shipment_id: int) -> tuple[str, bytes] | Non
     if label is None:
         return None
 
+    from reportlab.lib import colors
     from reportlab.lib.units import mm
     from reportlab.lib.utils import ImageReader
     from reportlab.pdfgen import canvas
@@ -131,49 +132,88 @@ def generate_label_pdf(db: Session, shipment_id: int) -> tuple[str, bytes] | Non
     pdf = canvas.Canvas(buffer, pagesize=(width, height))
     pdf.setTitle(f"Etiqueta {label.shipment_code}")
 
-    margin = 10 * mm
-    qr_size = 38 * mm
+    margin = 9 * mm
+    qr_size = 34 * mm
     qr_bytes = _build_qr_png(label.qr_payload)
+    primary = colors.HexColor("#28A745")
+    dark = colors.HexColor("#212529")
+    accent = colors.HexColor("#3C5940")
+    soft = colors.HexColor("#E4ECE2")
+    muted = colors.HexColor("#6C757D")
 
-    pdf.setFont("Helvetica-Bold", 17)
-    pdf.drawString(margin, height - 18 * mm, "Carmencita Express Cargo")
-    pdf.setFont("Helvetica-Bold", 20)
-    pdf.drawString(margin, height - 32 * mm, label.shipment_code)
-
-    pdf.drawImage(
-        ImageReader(BytesIO(qr_bytes)),
-        width - margin - qr_size,
-        height - margin - qr_size,
-        width=qr_size,
-        height=qr_size,
-    )
-
-    y = height - 58 * mm
-    pdf.setFont("Helvetica-Bold", 11)
-    pdf.drawString(margin, y, "Origen")
-    pdf.setFont("Helvetica", 12)
-    pdf.drawString(margin, y - 6 * mm, _truncate(label.origin, 34))
-
-    y -= 20 * mm
-    pdf.setFont("Helvetica-Bold", 11)
-    pdf.drawString(margin, y, "Destino")
-    pdf.setFont("Helvetica", 12)
-    pdf.drawString(margin, y - 6 * mm, _truncate(label.destination, 34))
-
-    y -= 22 * mm
-    pdf.setFont("Helvetica-Bold", 11)
-    pdf.drawString(margin, y, "Remitente")
-    pdf.setFont("Helvetica", 10)
-    pdf.drawString(margin, y - 6 * mm, _truncate(label.sender, 42))
-
-    y -= 18 * mm
-    pdf.setFont("Helvetica-Bold", 11)
-    pdf.drawString(margin, y, "Destinatario")
-    pdf.setFont("Helvetica", 10)
-    pdf.drawString(margin, y - 6 * mm, _truncate(label.recipient, 42))
-
+    pdf.setFillColor(primary)
+    pdf.roundRect(0, height - 31 * mm, width, 31 * mm, 0, fill=1, stroke=0)
+    pdf.setFillColor(colors.white)
+    pdf.setFont("Helvetica-Bold", 16)
+    pdf.drawString(margin, height - 13 * mm, "CARMENCITA EXPRESS")
     pdf.setFont("Helvetica", 8)
-    pdf.drawString(margin, 10 * mm, label.qr_payload.tracking)
+    pdf.drawString(margin, height - 19 * mm, "TRANSPORTE Y CARGA GENERAL")
+    pdf.setFont("Helvetica-Bold", 7)
+    pdf.drawString(margin, height - 26 * mm, "ETIQUETA DE ENCOMIENDA")
+
+    card_top = height - 37 * mm
+    pdf.setFillColor(soft)
+    pdf.roundRect(margin, card_top - 28 * mm, width - (2 * margin), 28 * mm, 3 * mm, fill=1, stroke=0)
+    pdf.setFillColor(accent)
+    pdf.setFont("Helvetica-Bold", 8)
+    pdf.drawString(margin + 5 * mm, card_top - 8 * mm, "CODIGO DE ENCOMIENDA")
+    pdf.setFillColor(dark)
+    pdf.setFont("Helvetica-Bold", 20)
+    pdf.drawString(margin + 5 * mm, card_top - 19 * mm, label.shipment_code)
+
+    qr_x = width - margin - qr_size
+    qr_y = card_top - 28 * mm - qr_size - 5 * mm
+    pdf.setFillColor(colors.white)
+    pdf.roundRect(qr_x - 2 * mm, qr_y - 2 * mm, qr_size + 4 * mm, qr_size + 4 * mm, 2 * mm, fill=1, stroke=0)
+    pdf.drawImage(ImageReader(BytesIO(qr_bytes)), qr_x, qr_y, width=qr_size, height=qr_size)
+
+    route_x = margin
+    route_y = qr_y + qr_size - 1 * mm
+    route_width = width - (3 * margin) - qr_size
+    pdf.setFillColor(accent)
+    pdf.setFont("Helvetica-Bold", 8)
+    pdf.drawString(route_x, route_y, "ORIGEN")
+    pdf.setFillColor(dark)
+    pdf.setFont("Helvetica-Bold", 11)
+    pdf.drawString(route_x, route_y - 6 * mm, _truncate(label.origin, 20))
+    pdf.setStrokeColor(primary)
+    pdf.setLineWidth(1.2)
+    pdf.line(route_x, route_y - 11 * mm, route_x + route_width, route_y - 11 * mm)
+    pdf.setFillColor(accent)
+    pdf.setFont("Helvetica-Bold", 8)
+    pdf.drawString(route_x, route_y - 18 * mm, "DESTINO")
+    pdf.setFillColor(dark)
+    pdf.setFont("Helvetica-Bold", 11)
+    pdf.drawString(route_x, route_y - 24 * mm, _truncate(label.destination, 20))
+
+    details_y = qr_y - 10 * mm
+    pdf.setStrokeColor(soft)
+    pdf.setLineWidth(0.8)
+    pdf.line(margin, details_y + 4 * mm, width - margin, details_y + 4 * mm)
+
+    pdf.setFillColor(accent)
+    pdf.setFont("Helvetica-Bold", 8)
+    pdf.drawString(margin, details_y, "REMITENTE")
+    pdf.setFillColor(dark)
+    pdf.setFont("Helvetica", 9)
+    pdf.drawString(margin, details_y - 6 * mm, _truncate(label.sender, 44))
+
+    details_y -= 17 * mm
+    pdf.setFillColor(accent)
+    pdf.setFont("Helvetica-Bold", 8)
+    pdf.drawString(margin, details_y, "DESTINATARIO")
+    pdf.setFillColor(dark)
+    pdf.setFont("Helvetica-Bold", 10)
+    pdf.drawString(margin, details_y - 6 * mm, _truncate(label.recipient, 44))
+
+    pdf.setFillColor(primary)
+    pdf.rect(0, 0, width, 18 * mm, fill=1, stroke=0)
+    pdf.setFillColor(colors.white)
+    pdf.setFont("Helvetica-Bold", 8)
+    pdf.drawString(margin, 11 * mm, "ESCANEA EL QR PARA RASTREAR TU ENVIO")
+    pdf.setFont("Helvetica", 7)
+    pdf.drawString(margin, 6 * mm, _truncate(label.qr_payload.tracking, 48))
+    pdf.setFillColor(muted)
     pdf.showPage()
     pdf.save()
 
@@ -224,6 +264,8 @@ def _truncate(value: str, max_length: int) -> str:
 def _upsert_clients_from_shipment_payload(
     db: Session,
     payload: ShipmentCreate | ShipmentPreRegistrationCreate | ShipmentUpdate,
+    *,
+    commit: bool,
 ) -> None:
     if _is_dni_document(getattr(payload, "sender_document_type", None)):
         upsert_client_from_person_data(
@@ -233,6 +275,7 @@ def _upsert_clients_from_shipment_payload(
             telefono=getattr(payload, "sender_phone", None),
             correo=getattr(payload, "sender_email", None),
             direccion=getattr(payload, "sender_address", None),
+            commit=commit,
         )
     if _is_dni_document(getattr(payload, "recipient_document_type", None)):
         upsert_client_from_person_data(
@@ -242,6 +285,7 @@ def _upsert_clients_from_shipment_payload(
             telefono=getattr(payload, "recipient_phone", None),
             correo=getattr(payload, "recipient_email", None),
             direccion=getattr(payload, "recipient_address", None),
+            commit=commit,
         )
 
 

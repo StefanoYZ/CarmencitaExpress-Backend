@@ -167,10 +167,28 @@ BASE_PERMISSIONS = [
         "module": "permissions",
         "action": "write",
     },
+    {
+        "code": "optimization.read",
+        "name": "Consultar optimizacion de carga",
+        "description": "Consultar paquetes, camiones y escenarios de optimizacion.",
+        "module": "optimization",
+        "action": "read",
+    },
+    {
+        "code": "optimization.run",
+        "name": "Ejecutar optimizacion de carga",
+        "description": "Ejecutar algoritmos de optimizacion y consultar sus resultados.",
+        "module": "optimization",
+        "action": "run",
+    },
 ]
 
 BASE_ROLE_PERMISSIONS = {
-    "ADMINISTRADOR": [permission["code"] for permission in BASE_PERMISSIONS],
+    "ADMINISTRADOR": [
+        permission["code"]
+        for permission in BASE_PERMISSIONS
+        if not permission["code"].startswith("optimization.")
+    ],
     "SECRETARIA": [
         "encomiendas.read",
         "encomiendas.write",
@@ -187,15 +205,13 @@ BASE_ROLE_PERMISSIONS = {
         "tracking.update_status",
     ],
     "ESTIBA": [
-        "encomiendas.read",
-        "etiquetas.read",
-        "tracking.read",
-        "tracking.update_status",
+        "optimization.read",
+        "optimization.run",
     ],
 }
 
 BASE_ROLE_DESCRIPTIONS = {
     "ADMINISTRADOR": "Acceso completo al sistema interno.",
     "SECRETARIA": "Gestiona registros, cotizaciones, boletas, etiquetas y tracking.",
-    "ESTIBA": "Consulta encomiendas, etiquetas y actualiza tracking operativo.",
+    "ESTIBA": "Acceso exclusivo a la optimizacion y simulacion de carga.",
 }

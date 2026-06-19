@@ -38,7 +38,7 @@ class ClientBase(BaseModel):
     @field_validator("full_name")
     @classmethod
     def validate_full_name(cls, value: str) -> str:
-        name = value.strip() if value else ""
+        name = _normalize_spaces(value)
         if not name:
             raise ValueError("nombre_completo cannot be empty")
         return name
@@ -53,6 +53,10 @@ class ClientBase(BaseModel):
             raise ValueError("telefono must contain only numbers")
         if len(phone) != 9:
             raise ValueError("telefono must have exactly 9 digits")
+        if not phone.startswith("9"):
+            raise ValueError("telefono must start with 9")
+        if len(set(phone)) == 1:
+            raise ValueError("telefono cannot repeat the same digit 9 times")
         return phone
 
     @field_validator("email")
@@ -69,7 +73,7 @@ class ClientBase(BaseModel):
     @field_validator("address")
     @classmethod
     def normalize_address(cls, value: str | None) -> str | None:
-        return _optional_text(value)
+        return _optional_normalized_text(value)
 
 
 class ClientCreate(ClientBase):
@@ -91,7 +95,7 @@ class ClientUpdate(BaseModel):
     @field_validator("full_name")
     @classmethod
     def validate_optional_full_name(cls, value: str | None) -> str | None:
-        return _optional_text(value)
+        return _optional_normalized_text(value)
 
     @field_validator("phone")
     @classmethod
@@ -103,6 +107,10 @@ class ClientUpdate(BaseModel):
             raise ValueError("telefono must contain only numbers")
         if len(phone) != 9:
             raise ValueError("telefono must have exactly 9 digits")
+        if not phone.startswith("9"):
+            raise ValueError("telefono must start with 9")
+        if len(set(phone)) == 1:
+            raise ValueError("telefono cannot repeat the same digit 9 times")
         return phone
 
     @field_validator("email")
@@ -119,7 +127,7 @@ class ClientUpdate(BaseModel):
     @field_validator("address")
     @classmethod
     def normalize_optional_address(cls, value: str | None) -> str | None:
-        return _optional_text(value)
+        return _optional_normalized_text(value)
 
 
 class ClientResponse(BaseModel):
@@ -138,4 +146,13 @@ def _optional_text(value: str | None) -> str | None:
     if value is None:
         return None
     normalized = value.strip()
+    return normalized or None
+
+
+def _normalize_spaces(value: str | None) -> str:
+    return " ".join(str(value or "").strip().split())
+
+
+def _optional_normalized_text(value: str | None) -> str | None:
+    normalized = _normalize_spaces(value)
     return normalized or None
