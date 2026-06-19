@@ -52,4 +52,5 @@ def route_ratio_from_rank(rank: int) -> float:
 def target_z_from_rank(rank: int, truck: Truck3D | Truck, depth: float) -> float:
     available_depth = max(truck.largo_cm - depth, 0.0)
     ratio = route_ratio_from_rank(rank)
-    return round(available_depth * (0.12 + (0.76 * ratio)), 3)
+    target_depth = truck.largo_cm * (1.0 - ratio)
+    return round(min(target_depth, available_depth), 3)
