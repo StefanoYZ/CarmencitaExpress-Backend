@@ -78,14 +78,16 @@ def create_pre_registration(db: Session, shipment_data: ShipmentPreRegistrationC
 
 
 def _commit_new_shipment_with_code_retry(db: Session, shipment: Shipment) -> Shipment:
-    db.add(shipment)
     try:
-        db.commit()
+        with db.begin_nested():
+            db.add(shipment)
+            db.flush([shipment])
     except IntegrityError:
-        db.rollback()
         shipment.shipment_code = generate_shipment_code(db)
-        db.add(shipment)
-        db.commit()
+        with db.begin_nested():
+            db.add(shipment)
+            db.flush([shipment])
+    db.commit()
     db.refresh(shipment)
     return shipment
 

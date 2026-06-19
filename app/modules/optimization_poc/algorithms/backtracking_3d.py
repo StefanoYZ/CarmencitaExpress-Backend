@@ -2,7 +2,14 @@
 from copy import deepcopy
 from time import perf_counter
 
+from app.modules.optimization_poc.algorithms.best_fit_decreasing_3d import (
+    find_placement as find_bfd_placement,
+)
+from app.modules.optimization_poc.algorithms.best_fit_decreasing_3d import (
+    order_packages as order_bfd_packages,
+)
 from app.modules.optimization_poc.models import Package3D, Truck3D
+from app.modules.optimization_poc.schema import Placement
 from app.modules.optimization_poc.utils.geometry import (
     create_initial_space,
     fits_dimensions_in_space,
@@ -18,6 +25,7 @@ from app.modules.optimization_poc.utils.logistic_rules import (
     calculate_stacking_capacity,
     calculate_support_ratio,
     calculate_zone_distance_penalty,
+    filter_candidate_options_by_loading_frontier,
     get_destination_priority,
     get_destination_zone,
     get_route,
@@ -28,6 +36,133 @@ from app.modules.optimization_poc.utils.logistic_rules import (
     validate_stability_constraint,
     validate_stacking_constraint,
 )
+from app.modules.optimization_poc.utils.progressive_loading import select_progressive_placement
+from app.modules.optimization_poc.validators import is_weight_allowed, recompute_supported_weights
+
+
+def build_progressive_seed(
+    truck: Truck3D,
+    packages: list[Package3D],
+    destination_priority: dict[str, int],
+) -> dict:
+    ordered_seed_packages = order_bfd_packages(packages)
+    pending_packages = list(enumerate(ordered_seed_packages))
+    placements: list[Placement] = []
+    placed_models: list[Package3D] = []
+    total_weight = 0.0
+
+    while pending_packages:
+        selectable_packages = [
+            item
+            for item in pending_packages
+            if is_weight_allowed(total_weight, item[1].weight, truck)
+        ]
+        if not selectable_packages:
+            break
+
+        selection = select_progressive_placement(
+            pending_packages=selectable_packages,
+            find_placement=find_bfd_placement,
+            truck=truck,
+            placements=placements,
+            allow_rotation=True,
+        )
+        if not selection:
+            break
+
+        original_index, package, placement = selection
+        placements.append(placement)
+        placed_models.append(package)
+        recompute_supported_weights(placements)
+        total_weight += package.weight
+        pending_packages = [
+            item
+            for item in pending_packages
+            if item[0] != original_index
+        ]
+
+    package_by_id = {package.id: package for package in placed_models}
+    placed_packages = [
+        placement_to_logistic_dict(
+            placement,
+            package_by_id[placement.package_id],
+            truck,
+            destination_priority,
+        )
+        for placement in placements
+    ]
+    placed_ids = {package.id for package in placed_models}
+    unplaced_packages = [
+        {
+            "id": package.id,
+            "reason_code": "NO_FEASIBLE_SPACE",
+            "reason": "No se encontro una posicion valida en la solucion inicial",
+        }
+        for package in packages
+        if package.id not in placed_ids
+    ]
+    return {
+        "placed_packages": placed_packages,
+        "unplaced_packages": unplaced_packages,
+        "used_volume": sum(
+            package["width"] * package["height"] * package["length"]
+            for package in placed_packages
+        ),
+        "total_weight": sum(package["weight"] for package in placed_packages),
+    }
+
+
+def placement_to_logistic_dict(
+    placement: Placement,
+    package: Package3D,
+    truck: Truck3D,
+    destination_priority: dict[str, int],
+) -> dict:
+    candidate_space = {
+        "x": placement.x,
+        "y": placement.y,
+        "z": placement.z,
+    }
+    return {
+        "id": package.id,
+        "codigo": package.codigo,
+        "description": package.descripcion,
+        "delivery_order": package.orden_entrega,
+        "priority": package.prioridad,
+        "x": placement.x,
+        "y": placement.y,
+        "z": placement.z,
+        "width": placement.width,
+        "height": placement.height,
+        "length": placement.depth,
+        "weight": package.weight,
+        "fragility": package.fragility,
+        "destination": package.destination,
+        "destination_priority": get_destination_priority(
+            package.destination,
+            destination_priority,
+        ),
+        "destination_zone": get_destination_zone(
+            package.destination,
+            truck,
+            destination_priority,
+        ),
+        "inside_destination_zone": space_overlaps_destination_zone(
+            candidate_space,
+            placement.depth,
+            package.destination,
+            truck,
+            destination_priority,
+        ),
+        "stacking_capacity": placement.stacking_capacity,
+        "stacking_constraint_satisfied": True,
+        "support_ratio": placement.support_ratio,
+        "minimum_support_ratio_required": MIN_SUPPORT_RATIO,
+        "stability_constraint_satisfied": placement.support_ratio >= MIN_SUPPORT_RATIO,
+        "content_type": package.content_type,
+        "supported_weight": placement.supported_weight,
+        "rotated": placement.orientation != "LWH",
+    }
 
 
 def get_backtracking_rejection_data(rejection_summary: dict) -> dict:
@@ -120,12 +255,11 @@ def backtracking_3d_algorithm(
         ),
     )
 
-    best_solution = {
-        "placed_packages": [],
-        "unplaced_packages": [],
-        "used_volume": 0.0,
-        "total_weight": 0.0,
-    }
+    best_solution = build_progressive_seed(
+        truck,
+        ordered_packages,
+        destination_priority,
+    )
 
     def is_better_solution(
         current_solution: dict,
@@ -158,6 +292,10 @@ def backtracking_3d_algorithm(
         total_weight: float,
     ) -> None:
         nonlocal best_solution
+
+        maximum_possible_count = len(placed_packages) + (len(ordered_packages) - index)
+        if maximum_possible_count < len(best_solution["placed_packages"]):
+            return
 
         if index >= len(ordered_packages):
             current_solution = {
@@ -310,9 +448,18 @@ def backtracking_3d_algorithm(
                     }
                 )
 
+        candidate_options = filter_candidate_options_by_loading_frontier(
+            candidate_options,
+            placed_packages,
+        )
+
         candidate_options.sort(
             key=lambda option: (
                 not option["inside_destination_zone"],
+                option["zone_penalty"],
+                option["space"]["z"],
+                option["space"]["y"],
+                option["space"]["x"],
                 option["optimization_score"],
             )
         )
@@ -489,14 +636,15 @@ def backtracking_3d_algorithm(
             total_weight=total_weight,
         )
 
-    backtrack(
-        index=0,
-        free_spaces=[create_initial_space(truck)],
-        placed_packages=[],
-        unplaced_packages=[],
-        used_volume=0.0,
-        total_weight=0.0,
-    )
+    if len(best_solution["placed_packages"]) < len(ordered_packages):
+        backtrack(
+            index=0,
+            free_spaces=[create_initial_space(truck)],
+            placed_packages=[],
+            unplaced_packages=[],
+            used_volume=0.0,
+            total_weight=0.0,
+        )
 
     placed_packages = best_solution[
         "placed_packages"
@@ -621,4 +769,3 @@ def backtracking_3d_algorithm(
             ordered_packages
         ),
     }
-

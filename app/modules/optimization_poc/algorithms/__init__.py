@@ -52,10 +52,14 @@ from app.modules.optimization_poc.algorithms.best_fit_3d import find_placement a
 from app.modules.optimization_poc.algorithms.best_fit_3d import order_packages as order_best_fit_packages
 from app.modules.optimization_poc.algorithms.first_fit_3d import find_placement as find_first_fit_placement
 from app.modules.optimization_poc.algorithms.first_fit_3d import order_packages as order_first_fit_packages
+from app.modules.optimization_poc.algorithms.best_fit_decreasing_3d import find_placement as find_bfd_placement
+from app.modules.optimization_poc.algorithms.best_fit_decreasing_3d import order_packages as order_bfd_packages
 from app.modules.optimization_poc.algorithms.maximin_3d import find_placement as find_maximin_placement
 from app.modules.optimization_poc.algorithms.maximin_3d import order_packages as order_maximin_packages
 from app.modules.optimization_poc.algorithms.minimax_3d import find_placement as find_minimax_placement
 from app.modules.optimization_poc.algorithms.minimax_3d import order_packages as order_minimax_packages
+from app.modules.optimization_poc.algorithms.worst_fit import find_placement as find_worst_fit_placement
+from app.modules.optimization_poc.algorithms.worst_fit import order_packages as order_worst_fit_packages
 
 PACKING_ALGORITHMS = {
     FIRST_FIT_3D: PackingAlgorithm(
@@ -69,6 +73,18 @@ PACKING_ALGORITHMS = {
         label="Best Fit 3D",
         order_packages=order_best_fit_packages,
         find_placement=find_best_fit_placement,
+    ),
+    WORST_FIT: PackingAlgorithm(
+        id=WORST_FIT,
+        label="Worst Fit",
+        order_packages=order_worst_fit_packages,
+        find_placement=find_worst_fit_placement,
+    ),
+    BEST_FIT_DECREASING_3D: PackingAlgorithm(
+        id=BEST_FIT_DECREASING_3D,
+        label="Best Fit Decreasing 3D",
+        order_packages=order_bfd_packages,
+        find_placement=find_bfd_placement,
     ),
     MINIMAX: PackingAlgorithm(
         id=MINIMAX,

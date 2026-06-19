@@ -9,5 +9,8 @@ qrcode
 Pillow
 mercadopago
 requests
+truststore
 sqlalchemy
 psycopg2-binary
+pytest
+pytest-cov

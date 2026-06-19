@@ -1,12 +1,17 @@
 from time import perf_counter
 
-from app.modules.optimization_poc.models import Package3D, Truck3D
+from app.modules.optimization_poc.models import Package3D, Truck3D, destination_rank
+from app.modules.optimization_poc.schema import Placement
 from app.modules.optimization_poc.utils.geometry import (
+    contact_score,
     create_initial_space,
+    dense_valid_candidates,
     fits_dimensions_in_space,
     generate_rotations,
+    projected_bounding_volume,
     space_volume,
     split_space,
+    support_ratio,
 )
 from app.modules.optimization_poc.utils.logistic_rules import (
     DEFAULT_ROUTE,
@@ -16,6 +21,7 @@ from app.modules.optimization_poc.utils.logistic_rules import (
     calculate_stacking_capacity,
     calculate_support_ratio,
     calculate_zone_distance_penalty,
+    filter_candidate_options_by_loading_frontier,
     get_destination_priority,
     get_destination_zone,
     get_route,
@@ -27,6 +33,51 @@ from app.modules.optimization_poc.utils.logistic_rules import (
     validate_stability_constraint,
     validate_stacking_constraint,
 )
+
+
+def order_packages(packages: list[Package3D]) -> list[Package3D]:
+    return sorted(
+        packages,
+        key=lambda package: (
+            -destination_rank(package),
+            -package.volume,
+            -package.weight,
+            package.codigo,
+        ),
+    )
+
+
+def find_placement(
+    package: Package3D,
+    truck: Truck3D,
+    placed: list[Placement],
+    sequence: int,
+    allow_rotation: bool,
+) -> Placement | None:
+    candidates = dense_valid_candidates(
+        package,
+        truck,
+        placed,
+        sequence,
+        allow_rotation,
+    )
+    if not candidates:
+        return None
+    return min(candidates, key=lambda candidate: _placement_score(candidate, truck, placed))
+
+
+def _placement_score(
+    candidate: Placement,
+    truck: Truck3D,
+    placed: list[Placement],
+) -> tuple[float, ...]:
+    return (
+        round(projected_bounding_volume(candidate, placed), 3),
+        round(1.0 - contact_score(candidate, truck, placed), 6),
+        round(1.0 - support_ratio(candidate, placed), 6),
+        round(candidate.y, 3),
+        round(candidate.x, 3),
+    )
 
 
 def best_fit_decreasing_3d_algorithm(
@@ -141,14 +192,16 @@ def best_fit_decreasing_3d_algorithm(
                     }
                 )
 
+        candidate_options = filter_candidate_options_by_loading_frontier(candidate_options, placed_packages)
         candidate_options = sorted(
             candidate_options,
             key=lambda option: (
                 not option["inside_destination_zone"],
-                option["optimization_score"],
-                option["space"]["y"],
+                option["zone_penalty"],
                 option["space"]["z"],
+                option["space"]["y"],
                 option["space"]["x"],
+                option["remaining_volume"],
             ),
         )
 

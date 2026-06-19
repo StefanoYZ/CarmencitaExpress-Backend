@@ -5,6 +5,8 @@ from app.core.database import SessionLocal, create_db_tables
 from app.core.config import settings
 from app.modules.auth.router import router as auth_router
 from app.modules.clients.router import router as clients_router
+from app.modules.charge_logs.router import router as charge_logs_router
+from app.modules.destinations.router import router as destinations_router
 from app.modules.optimization_poc.router import router as optimization_poc_router
 from app.modules.payments.router import router as payments_router
 from app.modules.quotes.router import router as quotes_router
@@ -13,6 +15,7 @@ from app.modules.shipments.router import router as shipments_router
 from app.modules.sunat.router import router as sunat_router
 from app.modules.users.router import permissions_router, roles_router, users_router
 from app.modules.users.service import seed_initial_access_control
+from app.modules.destinations.service import seed_default_destinations
 from app.modules.yape.router import router as yape_router
 
 app = FastAPI(title=settings.app_name)
@@ -27,6 +30,8 @@ app.add_middleware(
 )
 
 app.include_router(clients_router, prefix=settings.api_prefix)
+app.include_router(charge_logs_router, prefix=settings.api_prefix)
+app.include_router(destinations_router, prefix=settings.api_prefix)
 app.include_router(auth_router, prefix=settings.api_prefix)
 app.include_router(users_router, prefix=settings.api_prefix)
 app.include_router(roles_router, prefix=settings.api_prefix)
@@ -46,6 +51,7 @@ def startup() -> None:
     db = SessionLocal()
     try:
         seed_initial_access_control(db)
+        seed_default_destinations(db)
     finally:
         db.close()
 

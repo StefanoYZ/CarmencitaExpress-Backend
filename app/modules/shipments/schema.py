@@ -39,19 +39,28 @@ class ShipmentPayloadBase(BaseModel):
     height_cm: float = Field(alias="alto_cm")
     fragility: str = Field(alias="fragilidad")
 
-    @field_validator("sender_document_type", "sender_document_number", "sender_name", "recipient_name", "description")
+    @field_validator("sender_document_type", "sender_document_number")
     @classmethod
     def required_text(cls, value: str) -> str:
         if not value or not value.strip():
             raise ValueError("The field cannot be empty")
         return value.strip()
 
+    @field_validator("sender_name", "recipient_name", "description")
+    @classmethod
+    def normalize_required_text(cls, value: str) -> str:
+        normalized = _normalize_spaces(value)
+        if not normalized:
+            raise ValueError("The field cannot be empty")
+        return normalized
+
     @field_validator("origin", "destination")
     @classmethod
     def normalize_route(cls, value: str) -> str:
-        if not value or not value.strip():
+        normalized = _normalize_spaces(value)
+        if not normalized:
             raise ValueError("origin and destination cannot be empty")
-        return value.strip()
+        return normalized
 
     @field_validator(
         "sender_address",
@@ -67,6 +76,12 @@ class ShipmentPayloadBase(BaseModel):
         if value is None:
             return None
         normalized = value.strip()
+        return normalized or None
+
+    @field_validator("sender_address", "recipient_address")
+    @classmethod
+    def normalize_optional_address(cls, value: str | None) -> str | None:
+        normalized = _normalize_spaces(value)
         return normalized or None
 
     @field_validator("sender_document_type", "recipient_document_type", "content_type")
@@ -86,6 +101,10 @@ class ShipmentPayloadBase(BaseModel):
             raise ValueError("phone must contain only numbers")
         if len(value) != 9:
             raise ValueError("phone must have exactly 9 digits")
+        if not value.startswith("9"):
+            raise ValueError("phone must start with 9")
+        if len(set(value)) == 1:
+            raise ValueError("phone cannot repeat the same digit 9 times")
         return value
 
     @field_validator("sender_email", "recipient_email")
@@ -305,3 +324,7 @@ def _validate_document_number(document_type: str | None, document_number: str | 
         raise ValueError(f"{field_name} must contain only numbers")
     if len(document_number) != 8:
         raise ValueError(f"{field_name} must have exactly 8 digits")
+
+
+def _normalize_spaces(value: str | None) -> str:
+    return " ".join(str(value or "").strip().split())
