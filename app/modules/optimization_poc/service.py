@@ -18,13 +18,14 @@ from app.modules.optimization_poc.algorithms.backtracking_3d import backtracking
 from app.modules.optimization_poc.algorithms.best_fit_decreasing_3d import best_fit_decreasing_3d_algorithm
 from app.modules.optimization_poc.algorithms.worst_fit import worst_fit_algorithm
 from app.modules.optimization_poc.models import Package3D, Truck3D
-from app.modules.optimization_poc.repository import get_truck, list_packages, list_trucks
+from app.modules.optimization_poc.repository import get_truck, list_packages, list_packages_by_codes, list_trucks
 from app.modules.optimization_poc.schema import Package, Placement, RunRequest, ScenarioResponse, SimulationResponse
 from app.modules.optimization_poc.utils.metrics import calculate_metrics
-from app.modules.optimization_poc.validators import is_weight_allowed
+from app.modules.optimization_poc.utils.progressive_loading import select_progressive_placement
+from app.modules.optimization_poc.validators import is_weight_allowed, recompute_supported_weights
 
 
-def get_scenario(limit: int = 50) -> ScenarioResponse:
+def get_scenario(limit: int = 70) -> ScenarioResponse:
     return ScenarioResponse(
         packages=list_packages(limit=limit, shuffled=True),
         trucks=list_trucks(),
@@ -32,13 +33,14 @@ def get_scenario(limit: int = 50) -> ScenarioResponse:
             "x": "ancho del camion",
             "y": "altura del camion",
             "z": "largo o profundidad del camion",
-            "origin": "(0,0,0) esquina inferior izquierda cercana a la puerta de carga",
-            "door": "Z = 0",
+            "origin": "(0,0,0) esquina inferior izquierda del fondo de la bodega, junto a la cabina",
+            "front": "Z = 0 es el fondo del camion junto a la cabina",
+            "door": "Z = largo_cm es la puerta de carga",
         },
     )
 
 
-def ordered_packages(limit: int = 50, strategy: str = FIRST_FIT_3D) -> list[Package]:
+def ordered_packages(limit: int = 70, strategy: str = FIRST_FIT_3D) -> list[Package]:
     packages = build_packages(list_packages(limit=limit, shuffled=False))
     return [package.to_schema() for package in get_packing_algorithm(strategy).order_packages(packages)]
 
@@ -52,14 +54,15 @@ def run_best_fit(request: RunRequest) -> SimulationResponse:
 
 
 def run_worst_fit(request: RunRequest) -> SimulationResponse:
-    return _run_logistic_simulation(request, algorithm=WORST_FIT, runner=worst_fit_algorithm)
+    return _run_simulation(request, algorithm=WORST_FIT, strategy_id=WORST_FIT, strategy=None)
 
 
 def run_best_fit_decreasing(request: RunRequest) -> SimulationResponse:
-    return _run_logistic_simulation(
+    return _run_simulation(
         request,
         algorithm=BEST_FIT_DECREASING_3D,
-        runner=best_fit_decreasing_3d_algorithm,
+        strategy_id=BEST_FIT_DECREASING_3D,
+        strategy=None,
     )
 
 
@@ -91,34 +94,58 @@ def _run_simulation(
 
     truck = build_truck(truck_schema)
     packing_algorithm = get_packing_algorithm(strategy_id)
-    packages = packing_algorithm.order_packages(build_packages(list_packages(limit=request.package_limit, shuffled=False)))
+    packages = packing_algorithm.order_packages(packages_from_request(request))
+    pending_packages = list(enumerate(packages))
+    loading_order: list[Package3D] = []
     placements: list[Placement] = []
     unplaced: list[Package3D] = []
     total_weight = 0.0
     started = perf_counter()
 
-    for package in packages:
-        if not is_weight_allowed(total_weight, package.peso_kg, truck):
-            unplaced.append(package)
-            continue
+    while pending_packages:
+        overweight = [
+            item
+            for item in pending_packages
+            if not is_weight_allowed(total_weight, item[1].peso_kg, truck)
+        ]
+        if overweight:
+            overweight_indexes = {index for index, _ in overweight}
+            unplaced.extend(package for _, package in overweight)
+            pending_packages = [
+                item
+                for item in pending_packages
+                if item[0] not in overweight_indexes
+            ]
+            if not pending_packages:
+                break
 
-        placement = packing_algorithm.find_placement(
-            package,
-            truck,
-            placements,
-            len(placements) + 1,
-            request.allow_rotation,
+        selection = select_progressive_placement(
+            pending_packages=pending_packages,
+            find_placement=packing_algorithm.find_placement,
+            truck=truck,
+            placements=placements,
+            allow_rotation=request.allow_rotation,
         )
-        if placement:
-            placements.append(placement)
-            total_weight += package.peso_kg
-        else:
-            unplaced.append(package)
+        if not selection:
+            unplaced.extend(package for _, package in pending_packages)
+            break
+
+        original_index, package, placement = selection
+        placements.append(placement)
+        loading_order.append(package)
+        recompute_supported_weights(placements)
+        total_weight += package.peso_kg
+        pending_packages = [
+            item
+            for item in pending_packages
+            if item[0] != original_index
+        ]
 
     execution_ms = max(1, round((perf_counter() - started) * 1000))
+    result_packages = loading_order + unplaced
     metrics = calculate_metrics(
         truck=truck,
-        ordered_packages=packages,
+        ordered_packages=result_packages,
         placements=placements,
         unplaced_packages=unplaced,
         execution_ms=execution_ms,
@@ -129,19 +156,23 @@ def _run_simulation(
         strategy=strategy,
         truck=truck.to_schema(),
         input_count=len(packages),
-        ordered_packages=[package.to_schema() for package in packages],
+        ordered_packages=[package.to_schema() for package in result_packages],
         placements=placements,
         unplaced_packages=[package.to_schema() for package in unplaced],
         metrics=metrics,
     )
-
-
 def build_truck(truck) -> Truck3D:
     return truck if isinstance(truck, Truck3D) else Truck3D.from_schema(truck)
 
 
 def build_packages(packages: list[Package]) -> list[Package3D]:
     return [package if isinstance(package, Package3D) else Package3D.from_schema(package) for package in packages]
+
+
+def packages_from_request(request: RunRequest) -> list[Package3D]:
+    if request.package_codes:
+        return build_packages(list_packages_by_codes(request.package_codes))
+    return build_packages(list_packages(limit=request.package_limit, shuffled=False))
 
 
 def _run_logistic_simulation(
@@ -155,7 +186,7 @@ def _run_logistic_simulation(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Camion no encontrado para la PoC.")
 
     truck = build_truck(truck_schema)
-    packages = build_packages(list_packages(limit=request.package_limit, shuffled=False))
+    packages = packages_from_request(request)
     result = runner(
         truck,
         packages,
@@ -186,6 +217,9 @@ def _run_logistic_simulation(
                 fragility=package.fragilidad,
                 peso_kg=package.peso_kg,
                 descripcion=package.descripcion,
+                supported_weight=float(item.get("supported_weight", 0.0)),
+                stacking_capacity=float(item.get("stacking_capacity", 0.0)),
+                support_ratio=float(item.get("support_ratio", 1.0)),
             )
         )
 

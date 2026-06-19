@@ -267,6 +267,25 @@ def seed_initial_access_control(db: Session) -> AssignmentResponse:
             repository.assign_permission_to_role(db, role, permissions_by_code[permission_code])
             role = repository.get_role_by_id(db, role.id)
 
+        desired_codes = set(permission_codes)
+        if role.name == "ESTIBA":
+            permissions_to_remove = [
+                permission
+                for permission in role.permissions
+                if permission.code not in desired_codes
+            ]
+        else:
+            permissions_to_remove = [
+                permission
+                for permission in role.permissions
+                if permission.code.startswith("optimization.")
+                and permission.code not in desired_codes
+            ]
+
+        for permission in permissions_to_remove:
+            repository.remove_permission_from_role(db, role, permission)
+            role = repository.get_role_by_id(db, role.id)
+
     admin = repository.get_user_by_username(db, settings.default_admin_username)
     if admin is None:
         admin = repository.create_user(
