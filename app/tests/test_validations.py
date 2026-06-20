@@ -34,6 +34,33 @@ def test_shipment_normalizes_valid_data(valid_shipment_payload):
     assert shipment.sender_phone == "987654321"
 
 
+def test_shipment_rejects_same_origin_and_destination(valid_shipment_payload):
+    payload = {
+        **valid_shipment_payload,
+        "origen": "Trujillo",
+        "destino": "trujillo",
+    }
+
+    with pytest.raises(ValidationError):
+        ShipmentCreate(**payload)
+
+
+def test_document_envelope_allows_zero_dimensions(valid_shipment_payload):
+    payload = {
+        **valid_shipment_payload,
+        "tipo_contenido": "DOCUMENTOS",
+        "largo_cm": 0,
+        "ancho_cm": 0,
+        "alto_cm": 0,
+    }
+
+    shipment = ShipmentCreate(**payload)
+
+    assert shipment.length_cm == 0
+    assert shipment.width_cm == 0
+    assert shipment.height_cm == 0
+
+
 def test_client_rejects_invalid_phone():
     with pytest.raises(ValidationError):
         ClientCreate(

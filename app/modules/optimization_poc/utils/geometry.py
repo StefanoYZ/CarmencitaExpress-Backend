@@ -1,6 +1,6 @@
 from itertools import permutations
 
-from app.modules.optimization_poc.models.package import Package3D, destination_rank
+from app.modules.optimization_poc.models.package import Package3D, destination_rank, is_upright_appliance
 from app.modules.optimization_poc.models.truck import Truck3D, target_z_from_rank
 from app.modules.optimization_poc.schema import Placement
 from app.modules.optimization_poc.validators import (
@@ -49,7 +49,7 @@ def build_candidate(
 
 def orientations(package: Package3D, allow_rotation: bool) -> list[tuple[float, float, float, str]]:
     base = (package.ancho_cm, package.alto_cm, package.largo_cm)
-    if not allow_rotation:
+    if not allow_rotation or is_upright_appliance(package):
         return [(base[0], base[1], base[2], "LWH")]
 
     if not package.permite_rotacion:
@@ -453,6 +453,8 @@ def fits_in_space(package: Package3D, space: dict[str, float]) -> bool:
 
 def generate_rotations(package: Package3D) -> list[tuple[float, float, float]]:
     original = [(package.width, package.height, package.length)]
+    if is_upright_appliance(package):
+        return original
     if not package.permite_rotacion:
         if allows_controlled_thin_rotation(package):
             return [(width, height, length) for width, height, length, _ in controlled_thin_rotations((package.width, package.height, package.length))]

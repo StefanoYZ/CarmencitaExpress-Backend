@@ -20,6 +20,8 @@ class Package(BaseModel):
     ancho_cm: float
     alto_cm: float
     permite_rotacion: bool = True
+    tipo_contenido: str | None = None
+    requires_packing: bool = True
 
 
 class Truck(BaseModel):

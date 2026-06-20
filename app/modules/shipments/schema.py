@@ -117,11 +117,18 @@ class ShipmentPayloadBase(BaseModel):
             raise ValueError("email must be valid")
         return email
 
-    @field_validator("weight_kg", "length_cm", "width_cm", "height_cm")
+    @field_validator("weight_kg")
     @classmethod
-    def dimensions_must_be_positive(cls, value: float) -> float:
+    def weight_must_be_positive(cls, value: float) -> float:
         if not math.isfinite(value) or value <= 0:
-            raise ValueError("weight_kg, length_cm, width_cm and height_cm must be greater than 0")
+            raise ValueError("weight_kg must be greater than 0")
+        return value
+
+    @field_validator("length_cm", "width_cm", "height_cm")
+    @classmethod
+    def dimensions_must_be_non_negative(cls, value: float) -> float:
+        if not math.isfinite(value) or value < 0:
+            raise ValueError("length_cm, width_cm and height_cm cannot be negative")
         return value
 
     @field_validator("fragility")
@@ -151,6 +158,13 @@ class ShipmentPayloadBase(BaseModel):
                 self.recipient_document_number,
                 "destinatario_numero_documento",
             )
+        if self.origin.casefold() == self.destination.casefold():
+            raise ValueError("origin and destination must be different")
+        if self.content_type != "DOCUMENTOS" and any(
+            dimension <= 0
+            for dimension in (self.length_cm, self.width_cm, self.height_cm)
+        ):
+            raise ValueError("package dimensions must be greater than 0")
         return self
 
 
