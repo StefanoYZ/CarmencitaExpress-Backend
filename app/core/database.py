@@ -1,12 +1,22 @@
 from collections.abc import Generator
+import logging
+import time
 
 from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, declarative_base, sessionmaker
 
 from app.core.config import settings
 
 
-engine = create_engine(settings.database_url, pool_pre_ping=True)
+logger = logging.getLogger(__name__)
+
+engine = create_engine(
+    settings.sqlalchemy_database_url,
+    pool_pre_ping=True,
+    pool_recycle=300,
+    connect_args={"connect_timeout": 10},
+)
 
 SessionLocal = sessionmaker(
     autocommit=False,
@@ -28,7 +38,7 @@ def get_db() -> Generator[Session, None, None]:
         db.close()
 
 
-def create_db_tables() -> None:
+def create_db_tables(max_attempts: int = 5, retry_delay_seconds: int = 3) -> None:
     # Crea tablas nuevas y sincroniza columnas faltantes en desarrollo.
     from app.modules.clients import model as clients_model  # noqa: F401
     from app.modules.charge_logs import model as charge_logs_model  # noqa: F401
@@ -37,8 +47,25 @@ def create_db_tables() -> None:
     from app.modules.sunat import model as sunat_model  # noqa: F401
     from app.modules.users import model as users_model  # noqa: F401
 
-    Base.metadata.create_all(bind=engine)
-    sync_development_schema()
+    for attempt in range(1, max_attempts + 1):
+        try:
+            Base.metadata.create_all(bind=engine)
+            sync_development_schema()
+            return
+        except OperationalError:
+            if attempt == max_attempts:
+                logger.exception(
+                    "No se pudo conectar a PostgreSQL. Verifica DATABASE_URL y que "
+                    "la base Render este en la misma region si usas la URL interna."
+                )
+                raise
+            logger.warning(
+                "PostgreSQL no disponible (intento %s/%s). Reintentando en %s segundos.",
+                attempt,
+                max_attempts,
+                retry_delay_seconds,
+            )
+            time.sleep(retry_delay_seconds)
 
 
 def sync_development_schema() -> None:
