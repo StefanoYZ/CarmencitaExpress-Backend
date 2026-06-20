@@ -148,29 +148,25 @@ class UserCreate(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
     username: str
-    email: str
     password: str
     full_name: str
 
-    @field_validator("username", "email", "password", "full_name")
+    @field_validator("username", "password", "full_name")
     @classmethod
     def required_text(cls, value: str) -> str:
         if not value or not value.strip():
             raise ValueError("The field cannot be empty")
         return value.strip()
 
+    @field_validator("full_name")
+    @classmethod
+    def normalize_full_name(cls, value: str) -> str:
+        return " ".join(value.strip().split())
+
     @field_validator("username")
     @classmethod
     def normalize_username(cls, value: str) -> str:
         return value.strip().lower()
-
-    @field_validator("email")
-    @classmethod
-    def normalize_email(cls, value: str) -> str:
-        email = value.strip().lower()
-        if "@" not in email:
-            raise ValueError("email must be valid")
-        return email
 
     @field_validator("password")
     @classmethod
@@ -184,7 +180,6 @@ class UserUpdate(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
     username: str | None = None
-    email: str | None = None
     password: str | None = None
     full_name: str | None = None
     is_active: bool | None = None
@@ -197,16 +192,6 @@ class UserUpdate(BaseModel):
         if not value.strip():
             raise ValueError("username cannot be empty")
         return value.strip().lower()
-
-    @field_validator("email")
-    @classmethod
-    def normalize_optional_email(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        email = value.strip().lower()
-        if not email or "@" not in email:
-            raise ValueError("email must be valid")
-        return email
 
     @field_validator("password")
     @classmethod
@@ -224,7 +209,13 @@ class UserUpdate(BaseModel):
             return None
         if not value.strip():
             raise ValueError("full_name cannot be empty")
-        return value.strip()
+        return " ".join(value.strip().split())
+
+
+class UserStatusUpdate(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    is_active: bool
 
 
 class UserResponse(BaseModel):
@@ -232,7 +223,6 @@ class UserResponse(BaseModel):
 
     id: int
     username: str
-    email: str
     full_name: str
     is_active: bool
     roles: list[str] = Field(default_factory=list)

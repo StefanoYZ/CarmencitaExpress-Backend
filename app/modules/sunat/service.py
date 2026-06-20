@@ -8,13 +8,18 @@ from app.modules.quotes.schema import QuoteResponse
 from app.modules.quotes.service import calculate_quote_for_shipment
 from app.modules.shipments.service import get_shipment
 from app.modules.sunat.client import LycetClient
-from app.modules.sunat.exceptions import SunatEmissionBlockedError
+from app.modules.sunat.exceptions import LycetClientError, SunatEmissionBlockedError
+from app.modules.sunat.pdf_service import generate_electronic_receipt_pdf
+from app.modules.sunat import repository
+from app.modules.sunat.model import ElectronicReceipt
 from app.modules.sunat.schema import MockReceiptRecord, ReceiptResponse
 from app.modules.shipments.model import Shipment
 from app.modules.shipments.constants import CANCELED_STATUS, PRE_REGISTERED_STATUS
 
 
 MOCK_RECEIPT_SERIES = "B001"
+LYCET_TEST_RUC = "20161515648"
+LYCET_TEST_COMPANY_NAME = "CARMENCITA EXPRESS CARGO - PRUEBAS LYCET"
 
 # TODO: reemplazar este almacenamiento en memoria por repository + PostgreSQL.
 _mock_receipts_store: dict[tuple[str, str], MockReceiptRecord] = {}
@@ -76,16 +81,15 @@ def build_receipt_payload(
             },
         },
         "company": {
-            # TODO: configurar datos oficiales del emisor solo cuando se habilite emision real autorizada.
-            "ruc": "20000000001",
-            "razonSocial": "Empresa Demo - Modo Desarrollo",
-            "nombreComercial": "Carmencita Express Cargo S.A.C. (modo desarrollo)",
+            "ruc": LYCET_TEST_RUC,
+            "razonSocial": LYCET_TEST_COMPANY_NAME,
+            "nombreComercial": "Carmencita Express Cargo",
             "address": {
-                "direccion": "Direccion demo no fiscal",
-                "provincia": "Trujillo",
-                "departamento": "La Libertad",
-                "distrito": "Trujillo",
-                "ubigueo": "",
+                "direccion": "Av. America Sur 257",
+                "provincia": "TRUJILLO",
+                "departamento": "LA LIBERTAD",
+                "distrito": "TRUJILLO",
+                "ubigueo": "130101",
                 "codigoPais": "PE",
             },
         },
@@ -156,65 +160,99 @@ def issue_receipt_from_shipment(db: Session, shipment_id: int, confirm_payment: 
     _validate_shipment_can_emit_receipt(shipment)
 
     quote = calculate_quote_for_shipment(shipment)
-    number = _next_receipt_number()
+    if settings.sunat_env == "beta":
+        existing = repository.get_receipt_by_shipment(db, shipment_id)
+        if existing is not None:
+            return _receipt_response(existing, shipment.shipment_code)
+        number = repository.get_next_receipt_number(db, MOCK_RECEIPT_SERIES)
+    else:
+        number = _next_receipt_number()
     payload = build_receipt_payload(shipment, quote, number)
 
     if settings.sunat_env == "mock":
         return _issue_mock_receipt(shipment, quote, payload, number)
 
     if settings.sunat_env == "beta":
-        result = LycetClient().emitir_boleta(payload)
+        client = LycetClient()
+        result = client.emitir_boleta(payload)
         raw_response = result.get("raw_response", result)
         normalized = _normalize_lycet_response(raw_response)
-        today = date.today().isoformat()
-        return ReceiptResponse(
-            success=result.get("success", False),
-            ambiente="beta",
-            estado=normalized["status"],
-            serie=MOCK_RECEIPT_SERIES,
-            numero=number,
-            fecha_emision=today,
-            codigo_encomienda=shipment.shipment_code,
-            total=quote.total,
+        if not normalized["cdr"] or normalized["cdr_code"] is None:
+            status_response = client.consultar_cdr(
+                document_type="03",
+                series=MOCK_RECEIPT_SERIES,
+                number=number,
+                ruc=LYCET_TEST_RUC,
+            )
+            normalized = _merge_cdr_status(normalized, status_response)
+        if not normalized["cdr"] or normalized["cdr_code"] is None:
+            raise LycetClientError(
+                "Lycet no devolvio un CDR valido durante la emision ni en la consulta posterior"
+            )
+
+        receipt = repository.create_receipt(
+            db,
+            shipment_id=shipment.id,
+            environment="beta",
+            status=normalized["status"],
+            series=MOCK_RECEIPT_SERIES,
+            number=number,
+            issue_date=date.today().isoformat(),
             subtotal=quote.subtotal,
             igv=quote.igv,
-            moneda=quote.currency,
-            mensaje=result.get("mensaje", "Receipt sent to Lycet beta."),
+            total=quote.total,
+            currency=quote.currency,
             hash=normalized["hash"],
-            cdr=normalized["cdr"],
+            signed_xml=normalized["xml"],
+            cdr_zip=normalized["cdr"],
             cdr_code=normalized["cdr_code"],
             cdr_description=normalized["cdr_description"],
             cdr_notes=normalized["cdr_notes"],
+            request_payload=payload,
             raw_response=raw_response,
+        )
+        return _receipt_response(
+            receipt,
+            shipment.shipment_code,
+            message=result.get("mensaje", "Boleta enviada a Lycet beta."),
         )
 
     raise SunatEmissionBlockedError("SUNAT_ENV=production is blocked for this stage")
 
 
 def generate_beta_pdf_from_shipment(db: Session, shipment_id: int, confirm_payment: bool = True) -> tuple[str, bytes]:
-    shipment, _quote, payload = _build_beta_payload_from_shipment(db, shipment_id, confirm_payment)
-    pdf_bytes = LycetClient().generar_pdf(payload)
-    filename = f"boleta_beta_{shipment.shipment_code}.pdf"
+    shipment, quote, _payload = _build_beta_payload_from_shipment(db, shipment_id, confirm_payment)
+    receipt = repository.get_receipt_by_shipment(db, shipment_id)
+    if receipt is None:
+        issue_receipt_from_shipment(db, shipment_id, confirm_payment)
+        receipt = repository.get_receipt_by_shipment(db, shipment_id)
+    if receipt is None:
+        raise LycetClientError("Lycet no genero un comprobante persistible")
+
+    pdf_bytes = generate_electronic_receipt_pdf(receipt, shipment, quote)
+    filename = f"boleta_{receipt.series}_{receipt.number}.pdf"
     return filename, pdf_bytes
 
 
 def generate_beta_xml_from_shipment(db: Session, shipment_id: int, confirm_payment: bool = True) -> dict[str, Any]:
-    shipment, _quote, payload = _build_beta_payload_from_shipment(db, shipment_id, confirm_payment)
-    lycet_response = LycetClient().generar_xml(payload)
-
-    if isinstance(lycet_response, str):
-        return {
-            "success": True,
-            "ambiente": "beta",
-            "codigo_encomienda": shipment.shipment_code,
-            "xml": lycet_response,
-        }
-
+    shipment, _quote, _payload = _build_beta_payload_from_shipment(db, shipment_id, confirm_payment)
+    receipt = repository.get_receipt_by_shipment(db, shipment_id)
+    if receipt is None:
+        issue_receipt_from_shipment(db, shipment_id, confirm_payment)
+        receipt = repository.get_receipt_by_shipment(db, shipment_id)
+    if receipt is None or not receipt.signed_xml:
+        raise LycetClientError("Lycet no devolvio el XML firmado del comprobante")
     return {
         "success": True,
         "ambiente": "beta",
         "codigo_encomienda": shipment.shipment_code,
-        "raw_response": lycet_response,
+        "serie": receipt.series,
+        "numero": receipt.number,
+        "hash": receipt.hash,
+        "cdr": receipt.cdr_zip,
+        "cdr_code": receipt.cdr_code,
+        "cdr_description": receipt.cdr_description,
+        "xml": receipt.signed_xml,
     }
 
 
@@ -339,10 +377,56 @@ def _normalize_lycet_response(raw_response: dict[str, Any]) -> dict[str, Any]:
         cdr_notes = [cdr_notes]
 
     return {
-        "status": "ACEPTADO" if cdr_code == "0" else raw_response.get("estado", "ENVIADO_BETA"),
+        "status": "ACEPTADO" if str(cdr_code) == "0" else raw_response.get("estado", "ENVIADO_BETA"),
         "hash": raw_response.get("hash"),
+        "xml": raw_response.get("xml"),
         "cdr": sunat_response.get("cdrZip"),
         "cdr_code": cdr_code,
         "cdr_description": cdr_response.get("description"),
         "cdr_notes": cdr_notes,
     }
+
+
+def _merge_cdr_status(normalized: dict[str, Any], status_response: dict[str, Any]) -> dict[str, Any]:
+    cdr_response = status_response.get("cdrResponse") or {}
+    notes = cdr_response.get("notes") or normalized["cdr_notes"]
+    if isinstance(notes, str):
+        notes = [notes]
+    code = cdr_response.get("code", normalized["cdr_code"])
+    return {
+        **normalized,
+        "status": "ACEPTADO" if str(code) == "0" else normalized["status"],
+        "cdr": status_response.get("cdrZip") or normalized["cdr"],
+        "cdr_code": code,
+        "cdr_description": cdr_response.get("description") or normalized["cdr_description"],
+        "cdr_notes": notes,
+    }
+
+
+def _receipt_response(
+    receipt: ElectronicReceipt,
+    shipment_code: str,
+    *,
+    message: str = "Boleta electronica disponible.",
+) -> ReceiptResponse:
+    return ReceiptResponse(
+        success=receipt.status == "ACEPTADO",
+        ambiente=receipt.environment,
+        estado=receipt.status,
+        serie=receipt.series,
+        numero=receipt.number,
+        fecha_emision=receipt.issue_date,
+        codigo_encomienda=shipment_code,
+        total=receipt.total,
+        subtotal=receipt.subtotal,
+        igv=receipt.igv,
+        moneda=receipt.currency,
+        mensaje=message,
+        hash=receipt.hash,
+        xml=receipt.signed_xml,
+        cdr=receipt.cdr_zip,
+        cdr_code=receipt.cdr_code,
+        cdr_description=receipt.cdr_description,
+        cdr_notes=receipt.cdr_notes or [],
+        raw_response=receipt.raw_response,
+    )

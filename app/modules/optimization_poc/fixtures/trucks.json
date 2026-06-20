@@ -1,0 +1,4 @@
+﻿[
+  {"id":"CAMION_A","nombre":"Camion A","largo_cm":491,"ancho_cm":210,"alto_cm":220,"capacidad_peso_kg":5470},
+  {"id":"CAMION_B","nombre":"Camion B","largo_cm":491,"ancho_cm":210,"alto_cm":220,"capacidad_peso_kg":5470}
+]

@@ -9,6 +9,7 @@ from app.modules.sunat.exceptions import LycetClientError, SunatEmissionBlockedE
 LYCET_INVOICE_PDF_ENDPOINT = "/api/v1/invoice/pdf"
 LYCET_INVOICE_XML_ENDPOINT = "/api/v1/invoice/xml"
 LYCET_INVOICE_SEND_ENDPOINT = "/api/v1/invoice/send"
+LYCET_INVOICE_STATUS_ENDPOINT = "/api/v1/invoice/status"
 
 
 class LycetClient:
@@ -50,6 +51,25 @@ class LycetClient:
             "raw_response": data,
         }
 
+    def consultar_cdr(
+        self,
+        *,
+        document_type: str,
+        series: str,
+        number: str,
+        ruc: str,
+    ) -> dict[str, Any]:
+        response = self._get(
+            LYCET_INVOICE_STATUS_ENDPOINT,
+            params={
+                "tipo": document_type,
+                "serie": series,
+                "numero": number,
+                "ruc": ruc,
+            },
+        )
+        return self._json_response(response)
+
     def _post(self, endpoint: str, payload: dict[str, Any]) -> httpx.Response:
         url = f"{self.config.lycet_api_url.rstrip('/')}{endpoint}"
         params = {"token": self.config.lycet_client_token}
@@ -57,6 +77,21 @@ class LycetClient:
         try:
             with httpx.Client(timeout=30.0) as client:
                 response = client.post(url, params=params, json=payload)
+                response.raise_for_status()
+                return response
+        except httpx.HTTPStatusError as exc:
+            detail = self._response_error_detail(exc.response)
+            raise LycetClientError(f"Error HTTP de Lycet {exc.response.status_code}: {detail}") from exc
+        except httpx.HTTPError as exc:
+            raise LycetClientError(f"No se pudo conectar con Lycet: {exc}") from exc
+
+    def _get(self, endpoint: str, params: dict[str, Any]) -> httpx.Response:
+        url = f"{self.config.lycet_api_url.rstrip('/')}{endpoint}"
+        query = {"token": self.config.lycet_client_token, **params}
+
+        try:
+            with httpx.Client(timeout=30.0) as client:
+                response = client.get(url, params=query)
                 response.raise_for_status()
                 return response
         except httpx.HTTPStatusError as exc:

@@ -35,7 +35,6 @@ class Settings(BaseSettings):
     algorithm: Literal["HS256"] = Field(default="HS256", alias="ALGORITHM")
     access_token_expire_minutes: int = Field(default=1440, alias="ACCESS_TOKEN_EXPIRE_MINUTES")
     default_admin_username: str = Field(default="admin", alias="DEFAULT_ADMIN_USERNAME")
-    default_admin_email: str = Field(default="admin@carmencita.com", alias="DEFAULT_ADMIN_EMAIL")
     default_admin_password: str = Field(default="admin123", alias="DEFAULT_ADMIN_PASSWORD")
 
     model_config = SettingsConfigDict(

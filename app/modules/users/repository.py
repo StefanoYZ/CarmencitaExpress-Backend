@@ -1,4 +1,4 @@
-from sqlalchemy import asc, or_
+from sqlalchemy import asc
 from sqlalchemy.orm import Session, selectinload
 
 from app.modules.users.model import InternalUser, Permission, Role
@@ -23,30 +23,12 @@ def get_user_by_id(db: Session, user_id: int) -> InternalUser | None:
     )
 
 
-def get_user_by_username(db: Session, username: str) -> InternalUser | None:
-    return (
-        db.query(InternalUser)
-        .options(selectinload(InternalUser.roles).selectinload(Role.permissions))
-        .filter(InternalUser.username == username)
-        .first()
-    )
-
-
-def get_user_by_email(db: Session, email: str) -> InternalUser | None:
-    return (
-        db.query(InternalUser)
-        .options(selectinload(InternalUser.roles).selectinload(Role.permissions))
-        .filter(InternalUser.email == email)
-        .first()
-    )
-
-
-def get_user_by_username_or_email(db: Session, value: str) -> InternalUser | None:
+def get_user_by_username(db: Session, value: str) -> InternalUser | None:
     normalized = value.strip().lower()
     return (
         db.query(InternalUser)
         .options(selectinload(InternalUser.roles).selectinload(Role.permissions))
-        .filter(or_(InternalUser.username == normalized, InternalUser.email == normalized))
+        .filter(InternalUser.username == normalized)
         .first()
     )
 
@@ -54,7 +36,6 @@ def get_user_by_username_or_email(db: Session, value: str) -> InternalUser | Non
 def create_user(db: Session, payload: UserCreate, password_hash: str) -> InternalUser:
     user = InternalUser(
         username=payload.username,
-        email=payload.email,
         password_hash=password_hash,
         full_name=payload.full_name,
         is_active=True,
@@ -76,8 +57,8 @@ def update_user(db: Session, user: InternalUser, payload: UserUpdate, password_h
     return get_user_by_id(db, user.id)
 
 
-def disable_user(db: Session, user: InternalUser) -> InternalUser:
-    user.is_active = False
+def set_user_active(db: Session, user: InternalUser, is_active: bool) -> InternalUser:
+    user.is_active = is_active
     db.add(user)
     db.commit()
     return get_user_by_id(db, user.id)
