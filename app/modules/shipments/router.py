@@ -1,8 +1,15 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from datetime import date
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.dependencies import require_permission
+from app.modules.shipments.reports import (
+    generate_operational_report_excel,
+    generate_operational_report_pdf,
+)
 from app.modules.shipments.schema import (
     DeliveryRequest,
     DeliveryResponse,
@@ -62,6 +69,48 @@ def create_pre_registration_endpoint(
 @router.get("", response_model=list[ShipmentResponse])
 def list_shipments_endpoint(db: Session = Depends(get_db)) -> list[ShipmentResponse]:
     return list_shipments(db)
+
+
+@router.get("/reportes/operativo.pdf")
+def export_operational_report_pdf_endpoint(
+    fecha: date | None = Query(default=None),
+    estado: str | None = Query(default=None),
+    texto: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+    _current_user=Depends(require_permission("encomiendas.read")),
+) -> Response:
+    content = generate_operational_report_pdf(
+        db,
+        report_date=fecha,
+        status=estado,
+        search=texto,
+    )
+    return Response(
+        content=content,
+        media_type="application/pdf",
+        headers={"Content-Disposition": 'attachment; filename="reporte_encomiendas.pdf"'},
+    )
+
+
+@router.get("/reportes/operativo.xls")
+def export_operational_report_excel_endpoint(
+    fecha: date | None = Query(default=None),
+    estado: str | None = Query(default=None),
+    texto: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+    _current_user=Depends(require_permission("encomiendas.read")),
+) -> Response:
+    content = generate_operational_report_excel(
+        db,
+        report_date=fecha,
+        status=estado,
+        search=texto,
+    )
+    return Response(
+        content=content,
+        media_type="application/vnd.ms-excel",
+        headers={"Content-Disposition": 'attachment; filename="reporte_encomiendas.xls"'},
+    )
 
 
 @router.get("/codigo/{codigo_encomienda}", response_model=ShipmentResponse)

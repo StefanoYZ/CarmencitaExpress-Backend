@@ -4,6 +4,29 @@ from unicodedata import normalize
 from app.modules.optimization_poc.schema import Package, Placement
 from app.modules.optimization_poc.utils.constants import BEST_FIT_3D, DESTINATION_ALIASES, FRAGILITY_ORDER, MAXIMIN, MINIMAX, ROUTE_RANK, STACK_PRIORITY
 
+UPRIGHT_APPLIANCE_KEYWORDS = {
+    "AIR FRYER",
+    "ASPIRADORA",
+    "BATIDORA",
+    "CAFETERA",
+    "COCINA",
+    "CONGELADOR",
+    "CONGELADORA",
+    "ELECTRODOMENTICO",
+    "ELECTRODOMESTICO",
+    "EXTRACTORA",
+    "FREIDORA DE AIRE",
+    "HORNO",
+    "LAVADORA",
+    "LICUADORA",
+    "MICROONDAS",
+    "OLLA ARROCERA",
+    "PLANCHA",
+    "REFRIGERADOR",
+    "REFRIGERADORA",
+    "SECADORA",
+}
+
 
 @dataclass(frozen=True)
 class Package3D:
@@ -19,6 +42,8 @@ class Package3D:
     ancho_cm: float
     alto_cm: float
     permite_rotacion: bool = True
+    tipo_contenido: str | None = None
+    requires_packing: bool = True
 
     @property
     def volume(self) -> float:
@@ -54,7 +79,7 @@ class Package3D:
 
     @property
     def content_type(self) -> str:
-        return self.descripcion
+        return self.tipo_contenido or self.descripcion
 
     @classmethod
     def from_schema(cls, package: Package) -> "Package3D":
@@ -68,6 +93,23 @@ def normalize_destination(destination: str) -> str:
     normalized = normalize("NFKD", destination or "").encode("ascii", "ignore").decode("ascii")
     normalized = " ".join(normalized.upper().split())
     return DESTINATION_ALIASES.get(normalized, normalized)
+
+
+def is_upright_appliance(package: Package3D | Package) -> bool:
+    content_type = _normalize_text(getattr(package, "tipo_contenido", None) or getattr(package, "content_type", ""))
+    description = _normalize_text(getattr(package, "descripcion", ""))
+    searchable_text = f"{content_type} {description}"
+    return any(keyword in searchable_text for keyword in UPRIGHT_APPLIANCE_KEYWORDS)
+
+
+def _normalize_text(value: str | None) -> str:
+    return " ".join(
+        normalize("NFKD", value or "")
+        .encode("ascii", "ignore")
+        .decode("ascii")
+        .upper()
+        .split()
+    )
 
 
 def destination_rank(package: Package3D | Package | Placement) -> int:
