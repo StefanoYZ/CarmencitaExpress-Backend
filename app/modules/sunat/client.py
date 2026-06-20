@@ -16,6 +16,13 @@ class LycetClient:
     def __init__(self, config: Settings = settings) -> None:
         self.config = config
 
+    @property
+    def base_url(self) -> str:
+        base_url = self.config.lycet_api_url.strip().rstrip("/")
+        if base_url.endswith("/api/v1"):
+            return base_url[:-7]
+        return base_url
+
     def generar_pdf(self, payload: dict[str, Any]) -> bytes:
         response = self._post(LYCET_INVOICE_PDF_ENDPOINT, payload)
         content_type = response.headers.get("content-type", "").lower()
@@ -71,7 +78,7 @@ class LycetClient:
         return self._json_response(response)
 
     def _post(self, endpoint: str, payload: dict[str, Any]) -> httpx.Response:
-        url = f"{self.config.lycet_api_url.rstrip('/')}{endpoint}"
+        url = f"{self.base_url}{endpoint}"
         params = {"token": self.config.lycet_client_token}
 
         try:
@@ -86,7 +93,7 @@ class LycetClient:
             raise LycetClientError(f"No se pudo conectar con Lycet: {exc}") from exc
 
     def _get(self, endpoint: str, params: dict[str, Any]) -> httpx.Response:
-        url = f"{self.config.lycet_api_url.rstrip('/')}{endpoint}"
+        url = f"{self.base_url}{endpoint}"
         query = {"token": self.config.lycet_client_token, **params}
 
         try:
