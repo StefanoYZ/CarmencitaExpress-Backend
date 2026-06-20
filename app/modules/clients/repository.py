@@ -13,7 +13,12 @@ def list_clients(db: Session) -> list[Client]:
     return db.query(Client).order_by(desc(Client.updated_at)).all()
 
 
-def create_client(db: Session, data: ClientCreate | ClientUpsert) -> Client:
+def create_client(
+    db: Session,
+    data: ClientCreate | ClientUpsert,
+    *,
+    commit: bool = True,
+) -> Client:
     client = Client(
         dni=data.dni,
         full_name=data.full_name,
@@ -22,12 +27,17 @@ def create_client(db: Session, data: ClientCreate | ClientUpsert) -> Client:
         address=data.address,
     )
     db.add(client)
-    db.commit()
-    db.refresh(client)
+    _persist(db, client, commit=commit)
     return client
 
 
-def update_client(db: Session, dni: str, data: ClientUpdate | ClientUpsert) -> Client | None:
+def update_client(
+    db: Session,
+    dni: str,
+    data: ClientUpdate | ClientUpsert,
+    *,
+    commit: bool = True,
+) -> Client | None:
     client = get_client_by_dni(db, dni)
     if client is None:
         return None
@@ -35,21 +45,24 @@ def update_client(db: Session, dni: str, data: ClientUpdate | ClientUpsert) -> C
     changed = _apply_non_empty_updates(client, data)
     if changed:
         db.add(client)
-        db.commit()
-        db.refresh(client)
+        _persist(db, client, commit=commit)
     return client
 
 
-def upsert_client(db: Session, data: ClientUpsert) -> Client:
+def upsert_client(
+    db: Session,
+    data: ClientUpsert,
+    *,
+    commit: bool = True,
+) -> Client:
     client = get_client_by_dni(db, data.dni)
     if client is None:
-        return create_client(db, data)
+        return create_client(db, data, commit=commit)
 
     changed = _apply_non_empty_updates(client, data)
     if changed:
         db.add(client)
-        db.commit()
-        db.refresh(client)
+        _persist(db, client, commit=commit)
     return client
 
 
@@ -63,3 +76,11 @@ def _apply_non_empty_updates(client: Client, data: ClientUpdate | ClientUpsert) 
             setattr(client, field, value)
             changed = True
     return changed
+
+
+def _persist(db: Session, client: Client, *, commit: bool) -> None:
+    if commit:
+        db.commit()
+        db.refresh(client)
+        return
+    db.flush()

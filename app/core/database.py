@@ -21,15 +21,20 @@ def get_db() -> Generator[Session, None, None]:
     db = SessionLocal()
     try:
         yield db
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()
 
 
 def create_db_tables() -> None:
-    # Temporal en desarrollo: crea tablas automaticamente.
-    # En una fase posterior se reemplazara por Alembic con una migracion inicial.
+    # Crea tablas nuevas y sincroniza columnas faltantes en desarrollo.
     from app.modules.clients import model as clients_model  # noqa: F401
+    from app.modules.charge_logs import model as charge_logs_model  # noqa: F401
+    from app.modules.destinations import model as destinations_model  # noqa: F401
     from app.modules.shipments import model as shipments_model  # noqa: F401
+    from app.modules.sunat import model as sunat_model  # noqa: F401
     from app.modules.users import model as users_model  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
@@ -39,9 +44,8 @@ def create_db_tables() -> None:
 def sync_development_schema() -> None:
     """Add missing model columns in local development databases.
 
-    create_all() creates new tables but does not alter existing ones. The project
-    is still pre-Alembic, so this keeps local PostgreSQL schemas compatible with
-    the SQLAlchemy models after sprint changes add columns.
+    create_all() creates new tables but does not alter existing ones, so this
+    keeps local PostgreSQL schemas compatible with the SQLAlchemy models.
     """
     inspector = inspect(engine)
 

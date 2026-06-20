@@ -62,3 +62,22 @@ def require_permission(permission_code: str) -> Callable:
         return current_user
 
     return permission_dependency
+
+
+def require_role(role_name: str) -> Callable:
+    normalized_role = role_name.strip().upper()
+
+    def role_dependency(current_user: InternalUser = Depends(get_current_active_user)) -> InternalUser:
+        active_roles = {
+            role.name.strip().upper()
+            for role in current_user.roles
+            if role.is_active
+        }
+        if normalized_role not in active_roles:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Missing role: {normalized_role}",
+            )
+        return current_user
+
+    return role_dependency

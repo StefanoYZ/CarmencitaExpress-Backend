@@ -29,6 +29,7 @@ def upsert_client_from_person_data(
     telefono: str | None = None,
     correo: str | None = None,
     direccion: str | None = None,
+    commit: bool = True,
 ) -> Client | None:
     if not dni or not str(dni).strip().isdigit() or len(str(dni).strip()) != 8:
         return None
@@ -43,4 +44,4 @@ def upsert_client_from_person_data(
         correo=correo,
         direccion=direccion,
     )
-    return repository.upsert_client(db, payload)
+    return repository.upsert_client(db, payload, commit=commit)

@@ -12,6 +12,7 @@ from app.modules.users.schema import (
     RoleUpdate,
     UserCreate,
     UserResponse,
+    UserStatusUpdate,
     UserUpdate,
 )
 from app.modules.users.service import (
@@ -21,7 +22,6 @@ from app.modules.users.service import (
     create_role,
     create_user,
     disable_role,
-    disable_user,
     get_permission,
     get_role,
     get_role_permissions,
@@ -35,6 +35,7 @@ from app.modules.users.service import (
     update_permission,
     update_role,
     update_user,
+    set_user_active,
 )
 
 
@@ -91,13 +92,19 @@ def update_user_endpoint(
     return user
 
 
-@users_router.delete("/{user_id}", response_model=UserResponse)
-def disable_user_endpoint(
+@users_router.patch("/{user_id}/status", response_model=UserResponse)
+def update_user_status_endpoint(
     user_id: int,
+    payload: UserStatusUpdate,
     db: Session = Depends(get_db),
-    _current_user=Depends(require_permission("users.disable")),
+    current_user=Depends(require_permission("users.disable")),
 ) -> UserResponse:
-    user = disable_user(db, user_id)
+    if current_user.id == user_id and not payload.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No puedes desactivar la cuenta de tu sesion actual.",
+        )
+    user = set_user_active(db, user_id, payload.is_active)
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     return user

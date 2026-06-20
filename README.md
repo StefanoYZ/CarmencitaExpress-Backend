@@ -63,7 +63,7 @@ Crear la base de datos vacia en PostgreSQL:
 CREATE DATABASE carmencita_db;
 ```
 
-El backend crea automaticamente la tabla `encomiendas` en desarrollo usando SQLAlchemy `create_all`. Alembic se usara despues, cuando el modelo inicial este estable.
+El backend crea automaticamente las tablas nuevas en desarrollo usando SQLAlchemy `create_all`. Los ajustes sobre bases existentes se documentan mediante scripts SQL idempotentes.
 
 ```powershell
 pip install -r requirements.txt

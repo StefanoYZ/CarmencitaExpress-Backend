@@ -32,7 +32,6 @@ def get_user(db: Session, user_id: int) -> UserResponse | None:
 
 def create_user(db: Session, payload: UserCreate) -> UserResponse:
     _ensure_username_available(db, payload.username)
-    _ensure_email_available(db, payload.email)
     user = repository.create_user(db, payload, hash_password(payload.password))
     return build_user_response(user)
 
@@ -43,19 +42,17 @@ def update_user(db: Session, user_id: int, payload: UserUpdate) -> UserResponse 
         return None
     if payload.username is not None and payload.username != user.username:
         _ensure_username_available(db, payload.username)
-    if payload.email is not None and payload.email != user.email:
-        _ensure_email_available(db, payload.email)
     password_hash = hash_password(payload.password) if payload.password else None
     updated_user = repository.update_user(db, user, payload, password_hash)
     return build_user_response(updated_user)
 
 
-def disable_user(db: Session, user_id: int) -> UserResponse | None:
+def set_user_active(db: Session, user_id: int, is_active: bool) -> UserResponse | None:
     user = repository.get_user_by_id(db, user_id)
     if user is None:
         return None
-    disabled_user = repository.disable_user(db, user)
-    return build_user_response(disabled_user)
+    updated_user = repository.set_user_active(db, user, is_active)
+    return build_user_response(updated_user)
 
 
 def list_roles(db: Session) -> list[RoleResponse]:
@@ -189,8 +186,8 @@ def get_role_permissions(db: Session, role_id: int) -> list[PermissionResponse] 
     return [PermissionResponse.model_validate(permission) for permission in permissions]
 
 
-def authenticate_user(db: Session, username_or_email: str, password: str) -> InternalUser | None:
-    user = repository.get_user_by_username_or_email(db, username_or_email)
+def authenticate_user(db: Session, username: str, password: str) -> InternalUser | None:
+    user = repository.get_user_by_username(db, username)
     if user is None:
         return None
     if not user.is_active:
@@ -215,7 +212,6 @@ def build_user_response(user: InternalUser) -> UserResponse:
     return UserResponse(
         id=user.id,
         username=user.username,
-        email=user.email,
         full_name=user.full_name,
         is_active=user.is_active,
         roles=[role.name for role in active_roles],
@@ -267,13 +263,31 @@ def seed_initial_access_control(db: Session) -> AssignmentResponse:
             repository.assign_permission_to_role(db, role, permissions_by_code[permission_code])
             role = repository.get_role_by_id(db, role.id)
 
+        desired_codes = set(permission_codes)
+        if role.name == "ESTIBA":
+            permissions_to_remove = [
+                permission
+                for permission in role.permissions
+                if permission.code not in desired_codes
+            ]
+        else:
+            permissions_to_remove = [
+                permission
+                for permission in role.permissions
+                if permission.code.startswith("optimization.")
+                and permission.code not in desired_codes
+            ]
+
+        for permission in permissions_to_remove:
+            repository.remove_permission_from_role(db, role, permission)
+            role = repository.get_role_by_id(db, role.id)
+
     admin = repository.get_user_by_username(db, settings.default_admin_username)
     if admin is None:
         admin = repository.create_user(
             db,
             UserCreate(
                 username=settings.default_admin_username,
-                email=settings.default_admin_email,
                 password=settings.default_admin_password,
                 full_name="Administrador del Sistema",
             ),
@@ -290,11 +304,6 @@ def seed_initial_access_control(db: Session) -> AssignmentResponse:
 def _ensure_username_available(db: Session, username: str) -> None:
     if repository.get_user_by_username(db, username) is not None:
         raise ValueError("username already exists")
-
-
-def _ensure_email_available(db: Session, email: str) -> None:
-    if repository.get_user_by_email(db, email) is not None:
-        raise ValueError("email already exists")
 
 
 def _ensure_role_name_available(db: Session, name: str) -> None:
