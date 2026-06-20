@@ -34,6 +34,7 @@ def create_db_tables() -> None:
     from app.modules.charge_logs import model as charge_logs_model  # noqa: F401
     from app.modules.destinations import model as destinations_model  # noqa: F401
     from app.modules.shipments import model as shipments_model  # noqa: F401
+    from app.modules.sunat import model as sunat_model  # noqa: F401
     from app.modules.users import model as users_model  # noqa: F401
 
     Base.metadata.create_all(bind=engine)

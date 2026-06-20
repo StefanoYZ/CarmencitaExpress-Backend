@@ -16,6 +16,7 @@ from app.modules.clients import model as clients_model  # noqa: F401
 from app.modules.destinations import model as destinations_model  # noqa: F401
 from app.modules.destinations.service import seed_default_destinations
 from app.modules.shipments import model as shipments_model  # noqa: F401
+from app.modules.sunat import model as sunat_model  # noqa: F401
 from app.modules.users import model as users_model  # noqa: F401
 from app.modules.users import repository as users_repository
 from app.modules.users.schema import UserCreate
@@ -43,9 +44,9 @@ def db_session() -> Generator[Session, None, None]:
     db = TestingSessionLocal()
     seed_initial_access_control(db)
     seed_default_destinations(db)
-    _create_role_user(db, "qa_admin", "qa_admin@test.local", "ADMINISTRADOR")
-    _create_role_user(db, "qa_secretaria", "qa_secretaria@test.local", "SECRETARIA")
-    _create_role_user(db, "qa_estiba", "qa_estiba@test.local", "ESTIBA")
+    _create_role_user(db, "qa_admin", "ADMINISTRADOR")
+    _create_role_user(db, "qa_secretaria", "SECRETARIA")
+    _create_role_user(db, "qa_estiba", "ESTIBA")
 
     try:
         yield db
@@ -110,12 +111,11 @@ def valid_shipment_payload() -> dict:
     }
 
 
-def _create_role_user(db: Session, username: str, email: str, role_name: str) -> None:
+def _create_role_user(db: Session, username: str, role_name: str) -> None:
     user = create_user(
         db,
         UserCreate(
             username=username,
-            email=email,
             password="QaPassword123",
             full_name=f"TEST QA {role_name}",
         ),
