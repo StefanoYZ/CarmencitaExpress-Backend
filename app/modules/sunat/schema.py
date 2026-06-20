@@ -28,6 +28,7 @@ class ReceiptResponse(BaseModel):
     cdr_code: str | None = None
     cdr_description: str | None = None
     cdr_notes: list[str] = Field(default_factory=list)
+    signed_xml: str | None = Field(default=None, alias="xml")
     raw_response: dict[str, Any] | None = None
 
 
