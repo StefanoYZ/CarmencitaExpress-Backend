@@ -2,6 +2,7 @@ from time import perf_counter
 from uuid import uuid4
 
 from fastapi import HTTPException, status
+from sqlalchemy.orm import Session
 
 from app.modules.optimization_poc.algorithms import (
     BACKTRACKING_LOGISTIC,
@@ -18,16 +19,23 @@ from app.modules.optimization_poc.algorithms.backtracking_3d import backtracking
 from app.modules.optimization_poc.algorithms.best_fit_decreasing_3d import best_fit_decreasing_3d_algorithm
 from app.modules.optimization_poc.algorithms.worst_fit import worst_fit_algorithm
 from app.modules.optimization_poc.models import Package3D, Truck3D
-from app.modules.optimization_poc.repository import get_truck, list_packages, list_packages_by_codes, list_trucks
+from app.modules.optimization_poc.repository import (
+    get_truck,
+    list_packages,
+    list_packages_by_codes,
+    list_registered_packages,
+    list_registered_packages_by_codes,
+    list_trucks,
+)
 from app.modules.optimization_poc.schema import Package, Placement, RunRequest, ScenarioResponse, SimulationResponse
 from app.modules.optimization_poc.utils.metrics import calculate_metrics
 from app.modules.optimization_poc.utils.progressive_loading import select_progressive_placement
 from app.modules.optimization_poc.validators import is_weight_allowed, recompute_supported_weights
 
 
-def get_scenario(limit: int = 70) -> ScenarioResponse:
+def get_scenario(limit: int | None = None, db: Session | None = None) -> ScenarioResponse:
     return ScenarioResponse(
-        packages=list_packages(limit=limit, shuffled=True),
+        packages=_source_packages(limit=limit, db=db),
         trucks=list_trucks(),
         coordinate_system={
             "x": "ancho del camion",
@@ -40,45 +48,59 @@ def get_scenario(limit: int = 70) -> ScenarioResponse:
     )
 
 
-def ordered_packages(limit: int = 70, strategy: str = FIRST_FIT_3D) -> list[Package]:
-    packages = build_packages(list_packages(limit=limit, shuffled=False))
+def ordered_packages(
+    limit: int | None = None,
+    strategy: str = FIRST_FIT_3D,
+    db: Session | None = None,
+) -> list[Package]:
+    packages = build_packages(
+        [package for package in _source_packages(limit=limit, db=db) if package.requires_packing]
+    )
     return [package.to_schema() for package in get_packing_algorithm(strategy).order_packages(packages)]
 
 
-def run_first_fit(request: RunRequest) -> SimulationResponse:
-    return _run_simulation(request, algorithm=FIRST_FIT_3D, strategy_id=FIRST_FIT_3D, strategy=None)
+def run_first_fit(request: RunRequest, db: Session | None = None) -> SimulationResponse:
+    return _run_simulation(request, algorithm=FIRST_FIT_3D, strategy_id=FIRST_FIT_3D, strategy=None, db=db)
 
 
-def run_best_fit(request: RunRequest) -> SimulationResponse:
-    return _run_simulation(request, algorithm=BEST_FIT_3D, strategy_id=BEST_FIT_3D, strategy=None)
+def run_best_fit(request: RunRequest, db: Session | None = None) -> SimulationResponse:
+    return _run_simulation(request, algorithm=BEST_FIT_3D, strategy_id=BEST_FIT_3D, strategy=None, db=db)
 
 
-def run_worst_fit(request: RunRequest) -> SimulationResponse:
-    return _run_simulation(request, algorithm=WORST_FIT, strategy_id=WORST_FIT, strategy=None)
+def run_worst_fit(request: RunRequest, db: Session | None = None) -> SimulationResponse:
+    return _run_simulation(request, algorithm=WORST_FIT, strategy_id=WORST_FIT, strategy=None, db=db)
 
 
-def run_best_fit_decreasing(request: RunRequest) -> SimulationResponse:
+def run_best_fit_decreasing(request: RunRequest, db: Session | None = None) -> SimulationResponse:
     return _run_simulation(
         request,
         algorithm=BEST_FIT_DECREASING_3D,
         strategy_id=BEST_FIT_DECREASING_3D,
         strategy=None,
+        db=db,
     )
 
 
-def run_backtracking_logistic(request: RunRequest) -> SimulationResponse:
+def run_backtracking_logistic(request: RunRequest, db: Session | None = None) -> SimulationResponse:
     return _run_logistic_simulation(
         request,
         algorithm=BACKTRACKING_LOGISTIC,
         runner=backtracking_3d_algorithm,
+        db=db,
     )
 
 
-def run_minimax_maximin(request: RunRequest) -> SimulationResponse:
+def run_minimax_maximin(request: RunRequest, db: Session | None = None) -> SimulationResponse:
     strategy = (request.strategy or MINIMAX).upper()
     if strategy not in {MINIMAX, MAXIMIN}:
         strategy = MINIMAX
-    return _run_simulation(request, algorithm=MINIMAX_MAXIMIN_3D, strategy_id=strategy, strategy=strategy)
+    return _run_simulation(
+        request,
+        algorithm=MINIMAX_MAXIMIN_3D,
+        strategy_id=strategy,
+        strategy=strategy,
+        db=db,
+    )
 
 
 def _run_simulation(
@@ -87,6 +109,7 @@ def _run_simulation(
     algorithm: str,
     strategy_id: str,
     strategy: str | None,
+    db: Session | None = None,
 ) -> SimulationResponse:
     truck_schema = get_truck(request.truck_id)
     if not truck_schema:
@@ -94,7 +117,10 @@ def _run_simulation(
 
     truck = build_truck(truck_schema)
     packing_algorithm = get_packing_algorithm(strategy_id)
-    packages = packing_algorithm.order_packages(packages_from_request(request))
+    source_packages = packages_from_request(request, db=db)
+    packages = packing_algorithm.order_packages(
+        [package for package in source_packages if package.requires_packing]
+    )
     pending_packages = list(enumerate(packages))
     loading_order: list[Package3D] = []
     placements: list[Placement] = []
@@ -142,10 +168,9 @@ def _run_simulation(
         ]
 
     execution_ms = max(1, round((perf_counter() - started) * 1000))
-    result_packages = loading_order + unplaced
     metrics = calculate_metrics(
         truck=truck,
-        ordered_packages=result_packages,
+        ordered_packages=packages,
         placements=placements,
         unplaced_packages=unplaced,
         execution_ms=execution_ms,
@@ -155,8 +180,8 @@ def _run_simulation(
         algorithm=algorithm,
         strategy=strategy,
         truck=truck.to_schema(),
-        input_count=len(packages),
-        ordered_packages=[package.to_schema() for package in result_packages],
+        input_count=len(source_packages),
+        ordered_packages=[package.to_schema() for package in source_packages],
         placements=placements,
         unplaced_packages=[package.to_schema() for package in unplaced],
         metrics=metrics,
@@ -169,10 +194,21 @@ def build_packages(packages: list[Package]) -> list[Package3D]:
     return [package if isinstance(package, Package3D) else Package3D.from_schema(package) for package in packages]
 
 
-def packages_from_request(request: RunRequest) -> list[Package3D]:
+def packages_from_request(request: RunRequest, db: Session | None = None) -> list[Package3D]:
     if request.package_codes:
-        return build_packages(list_packages_by_codes(request.package_codes))
-    return build_packages(list_packages(limit=request.package_limit, shuffled=False))
+        packages = (
+            list_registered_packages_by_codes(db, request.package_codes)
+            if db is not None
+            else list_packages_by_codes(request.package_codes)
+        )
+        return build_packages(packages)
+    return build_packages(_source_packages(limit=request.package_limit, db=db))
+
+
+def _source_packages(limit: int | None, db: Session | None) -> list[Package]:
+    if db is not None:
+        return list_registered_packages(db, limit=limit)
+    return list_packages(limit=limit or 70, shuffled=False)
 
 
 def _run_logistic_simulation(
@@ -180,13 +216,15 @@ def _run_logistic_simulation(
     *,
     algorithm: str,
     runner,
+    db: Session | None = None,
 ) -> SimulationResponse:
     truck_schema = get_truck(request.truck_id)
     if not truck_schema:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Camion no encontrado para la PoC.")
 
     truck = build_truck(truck_schema)
-    packages = packages_from_request(request)
+    source_packages = packages_from_request(request, db=db)
+    packages = [package for package in source_packages if package.requires_packing]
     result = runner(
         truck,
         packages,
@@ -244,8 +282,8 @@ def _run_logistic_simulation(
         algorithm=algorithm,
         strategy=None,
         truck=truck.to_schema(),
-        input_count=len(ordered_packages),
-        ordered_packages=[package.to_schema() for package in ordered_packages],
+        input_count=len(source_packages),
+        ordered_packages=[package.to_schema() for package in source_packages],
         placements=placements,
         unplaced_packages=[package.to_schema() for package in unplaced_packages],
         metrics=metrics,
