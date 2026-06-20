@@ -212,6 +212,12 @@ class UserUpdate(BaseModel):
         return " ".join(value.strip().split())
 
 
+class UserStatusUpdate(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    is_active: bool
+
+
 class UserResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
