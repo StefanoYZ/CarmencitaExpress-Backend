@@ -19,6 +19,44 @@ def test_estiba_cannot_access_users(api_client, estiba_headers):
     assert response.status_code == 403
 
 
+def test_admin_creates_and_toggles_user_without_email(api_client, admin_headers):
+    created = api_client.post(
+        "/api/v1/users",
+        headers=admin_headers,
+        json={
+            "username": "qa_toggle",
+            "password": "QaPassword123",
+            "full_name": "TEST QA TOGGLE",
+        },
+    )
+    assert created.status_code == 201, created.text
+    data = created.json()
+    assert "email" not in data
+    assert data["is_active"] is True
+
+    disabled = api_client.put(
+        f"/api/v1/users/{data['id']}",
+        headers=admin_headers,
+        json={"is_active": False},
+    )
+    assert disabled.status_code == 200, disabled.text
+    assert disabled.json()["is_active"] is False
+
+    enabled = api_client.put(
+        f"/api/v1/users/{data['id']}",
+        headers=admin_headers,
+        json={"is_active": True},
+    )
+    assert enabled.status_code == 200, enabled.text
+    assert enabled.json()["is_active"] is True
+
+    delete_attempt = api_client.delete(
+        f"/api/v1/users/{data['id']}",
+        headers=admin_headers,
+    )
+    assert delete_attempt.status_code == 405
+
+
 def test_admin_cannot_run_optimization(api_client, admin_headers):
     response = api_client.post(
         "/api/v1/optimization/poc/first-fit/run",

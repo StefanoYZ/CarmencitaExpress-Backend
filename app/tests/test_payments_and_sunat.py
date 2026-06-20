@@ -2,6 +2,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.modules.charge_logs.model import ChargeLog
+from app.modules.sunat.model import ElectronicReceipt
 from app.modules.sunat import service as sunat_service
 
 
@@ -108,17 +109,20 @@ def test_sunat_mock_emission_and_pdf(
 
 def test_sunat_beta_client_contract(
     api_client,
+    db_session,
     valid_shipment_payload,
     monkeypatch,
 ):
     monkeypatch.setattr(settings, "sunat_env", "beta")
-    monkeypatch.setattr(
-        sunat_service.LycetClient,
-        "emitir_boleta",
-        lambda self, payload: {
+    send_calls = []
+
+    def emit_receipt(_self, payload):
+        send_calls.append(payload)
+        return {
             "success": True,
             "mensaje": "TEST QA beta",
             "raw_response": {
+                "xml": "<Invoice>TEST_QA_XML</Invoice>",
                 "hash": "TEST_HASH",
                 "sunatResponse": {
                     "cdrZip": "TEST_CDR",
@@ -129,7 +133,12 @@ def test_sunat_beta_client_contract(
                     },
                 },
             },
-        },
+        }
+
+    monkeypatch.setattr(
+        sunat_service.LycetClient,
+        "emitir_boleta",
+        emit_receipt,
     )
     created = api_client.post("/api/v1/encomiendas", json=valid_shipment_payload).json()
     emitted = api_client.post(
@@ -140,3 +149,70 @@ def test_sunat_beta_client_contract(
     assert emitted.status_code == 200, emitted.text
     assert emitted.json()["ambiente"] == "beta"
     assert emitted.json()["cdr_code"] == "0"
+    assert emitted.json()["cdr"] == "TEST_CDR"
+    assert emitted.json()["xml"] == "<Invoice>TEST_QA_XML</Invoice>"
+
+    emitted_again = api_client.post(
+        "/api/v1/sunat/boletas/emitir-desde-encomienda",
+        json={"encomienda_id": created["id"], "confirmar_pago": True},
+    )
+    assert emitted_again.status_code == 200
+    assert len(send_calls) == 1
+
+    receipt = db_session.query(ElectronicReceipt).one()
+    assert receipt.signed_xml == "<Invoice>TEST_QA_XML</Invoice>"
+    assert receipt.cdr_zip == "TEST_CDR"
+
+
+def test_sunat_beta_pdf_and_xml_reuse_persisted_receipt(
+    api_client,
+    db_session,
+    valid_shipment_payload,
+    monkeypatch,
+):
+    monkeypatch.setattr(settings, "sunat_env", "beta")
+    send_calls = []
+
+    def emit_receipt(_self, payload):
+        send_calls.append(payload)
+        return {
+            "success": True,
+            "mensaje": "Aceptado",
+            "raw_response": {
+                "xml": "<Invoice>FIRMADO_QA</Invoice>",
+                "hash": "HASH_QA",
+                "sunatResponse": {
+                    "cdrZip": "CDR_QA",
+                    "cdrResponse": {
+                        "code": "0",
+                        "description": "La Boleta numero B001 ha sido aceptada",
+                        "notes": [],
+                    },
+                },
+            },
+        }
+
+    monkeypatch.setattr(sunat_service.LycetClient, "emitir_boleta", emit_receipt)
+    created = api_client.post("/api/v1/encomiendas", json=valid_shipment_payload).json()
+
+    pdf = api_client.post(
+        "/api/v1/sunat/boletas/beta/pdf-desde-encomienda",
+        json={"encomienda_id": created["id"], "confirmar_pago": True},
+    )
+    xml = api_client.post(
+        "/api/v1/sunat/boletas/beta/xml-desde-encomienda",
+        json={"encomienda_id": created["id"], "confirmar_pago": True},
+    )
+
+    assert pdf.status_code == 200, pdf.text
+    assert pdf.content.startswith(b"%PDF")
+    assert xml.status_code == 200, xml.text
+    assert xml.json()["xml"] == "<Invoice>FIRMADO_QA</Invoice>"
+    assert xml.json()["cdr"] == "CDR_QA"
+    assert xml.json()["cdr_code"] == "0"
+    assert len(send_calls) == 1
+
+    persisted = db_session.query(ElectronicReceipt).one()
+    assert persisted.shipment_id == created["id"]
+    assert persisted.signed_xml == "<Invoice>FIRMADO_QA</Invoice>"
+    assert persisted.cdr_zip == "CDR_QA"

@@ -198,7 +198,7 @@ def generate_label_pdf(db: Session, shipment_id: int) -> tuple[str, bytes] | Non
     pdf.setFont("Helvetica", 9)
     pdf.drawString(margin, details_y - 6 * mm, _truncate(label.sender, 44))
 
-    details_y -= 17 * mm
+    details_y -= 14 * mm
     pdf.setFillColor(accent)
     pdf.setFont("Helvetica-Bold", 8)
     pdf.drawString(margin, details_y, "DESTINATARIO")
@@ -207,12 +207,12 @@ def generate_label_pdf(db: Session, shipment_id: int) -> tuple[str, bytes] | Non
     pdf.drawString(margin, details_y - 6 * mm, _truncate(label.recipient, 44))
 
     pdf.setFillColor(primary)
-    pdf.rect(0, 0, width, 18 * mm, fill=1, stroke=0)
+    pdf.rect(0, 0, width, 13 * mm, fill=1, stroke=0)
     pdf.setFillColor(colors.white)
     pdf.setFont("Helvetica-Bold", 8)
-    pdf.drawString(margin, 11 * mm, "ESCANEA EL QR PARA RASTREAR TU ENVIO")
+    pdf.drawString(margin, 8 * mm, "ESCANEA EL QR PARA RASTREAR TU ENVIO")
     pdf.setFont("Helvetica", 7)
-    pdf.drawString(margin, 6 * mm, _truncate(label.qr_payload.tracking, 48))
+    pdf.drawString(margin, 3.5 * mm, _truncate(label.qr_payload.tracking, 48))
     pdf.setFillColor(muted)
     pdf.showPage()
     pdf.save()

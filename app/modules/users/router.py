@@ -21,7 +21,6 @@ from app.modules.users.service import (
     create_role,
     create_user,
     disable_role,
-    disable_user,
     get_permission,
     get_role,
     get_role_permissions,
@@ -86,18 +85,6 @@ def update_user_endpoint(
         user = update_user(db, user_id, payload)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    if user is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-    return user
-
-
-@users_router.delete("/{user_id}", response_model=UserResponse)
-def disable_user_endpoint(
-    user_id: int,
-    db: Session = Depends(get_db),
-    _current_user=Depends(require_permission("users.disable")),
-) -> UserResponse:
-    user = disable_user(db, user_id)
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     return user
@@ -305,3 +292,4 @@ def update_permission_endpoint(
     if permission is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Permission not found")
     return permission
+    set_user_active,
