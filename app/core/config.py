@@ -48,6 +48,15 @@ class Settings(BaseSettings):
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
 
     @property
+    def sqlalchemy_database_url(self) -> str:
+        value = self.database_url.strip()
+        if value.startswith("postgres://"):
+            return value.replace("postgres://", "postgresql+psycopg2://", 1)
+        if value.startswith("postgresql://"):
+            return value.replace("postgresql://", "postgresql+psycopg2://", 1)
+        return value
+
+    @property
     def production_emission_blocked(self) -> bool:
         return self.sunat_env == "production" and not self.sunat_allow_real_emission
 
