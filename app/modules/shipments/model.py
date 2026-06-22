@@ -32,6 +32,7 @@ class Shipment(Base):
     height_cm = Column("alto_cm", Float, nullable=False)
     fragility = Column("fragilidad", String(20), nullable=False)
     content_type = Column("tipo_contenido", String(50), nullable=True)
+    base_orientation = Column("orientacion_base", String(30), nullable=True)
     registration_origin = Column("origen_registro", String(20), nullable=True)
     status = Column("estado", String(30), nullable=False)
     cancellation_reason = Column("motivo_anulacion", Text, nullable=True)
