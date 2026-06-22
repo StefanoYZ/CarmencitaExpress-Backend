@@ -43,6 +43,7 @@ class Package3D:
     alto_cm: float
     permite_rotacion: bool = True
     tipo_contenido: str | None = None
+    orientacion_base: str | None = None
     requires_packing: bool = True
 
     @property
