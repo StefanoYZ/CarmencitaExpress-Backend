@@ -3,8 +3,6 @@ from collections.abc import Callable
 from app.modules.optimization_poc.models import Package3D, Truck3D, destination_rank
 from app.modules.optimization_poc.schema import Placement
 
-PROGRESSIVE_LOOKAHEAD = 12
-
 PlacementFinder = Callable[
     [Package3D, Truck3D, list[Placement], int, bool],
     Placement | None,
@@ -20,11 +18,9 @@ def select_progressive_placement(
     allow_rotation: bool,
 ) -> tuple[int, Package3D, Placement] | None:
     evaluated: list[tuple[int, Package3D, Placement]] = []
-    evaluated_indexes: set[int] = set()
 
     def evaluate(item: tuple[int, Package3D]) -> Placement | None:
         original_index, package = item
-        evaluated_indexes.add(original_index)
         placement = find_placement(
             package,
             truck,
@@ -36,7 +32,10 @@ def select_progressive_placement(
             evaluated.append((original_index, package, placement))
         return placement
 
-    for item in pending_packages[:PROGRESSIVE_LOOKAHEAD]:
+    # La cara base elegida reduce cada paquete a dos giros horizontales.
+    # Esto permite revisar todos los pendientes para encontrar piezas pequenas
+    # que llenen huecos anteriores antes de avanzar hacia la puerta.
+    for item in pending_packages:
         evaluate(item)
 
     if evaluated:
@@ -48,10 +47,6 @@ def select_progressive_placement(
         ]
         if deepest_candidates:
             return min(deepest_candidates, key=progressive_selection_key)
-
-    for item in pending_packages:
-        if item[0] not in evaluated_indexes:
-            evaluate(item)
 
     if not evaluated:
         return None
