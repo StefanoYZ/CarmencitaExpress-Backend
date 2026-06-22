@@ -6,7 +6,8 @@ from random import Random
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.modules.optimization_poc.models.package import Package3D, is_upright_appliance, normalize_destination
+from app.modules.optimization_poc.models.package import normalize_destination
+# from app.modules.optimization_poc.models.package import Package3D, is_upright_appliance
 from app.modules.optimization_poc.schema import Package, Truck
 from app.modules.optimization_poc.utils.constants import ROUTE_RANK
 from app.modules.shipments.constants import (
@@ -111,8 +112,11 @@ def _shipment_to_package(shipment: Shipment) -> Package:
         alto_cm=shipment.height_cm,
         permite_rotacion=requires_packing,
         tipo_contenido=content_type,
+        orientacion_base=shipment.base_orientation or ("LARGO_ANCHO" if requires_packing else None),
         requires_packing=requires_packing,
     )
-    if requires_packing and is_upright_appliance(Package3D.from_schema(package)):
-        package.permite_rotacion = False
+    # Regla anterior conservada como referencia: los electrodomesticos se
+    # restringian automaticamente a posicion vertical.
+    # if requires_packing and is_upright_appliance(Package3D.from_schema(package)):
+    #     package.permite_rotacion = False
     return package

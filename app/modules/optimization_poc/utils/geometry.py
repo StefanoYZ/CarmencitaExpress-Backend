@@ -1,6 +1,6 @@
 from itertools import permutations
 
-from app.modules.optimization_poc.models.package import Package3D, destination_rank, is_upright_appliance
+from app.modules.optimization_poc.models.package import Package3D, destination_rank
 from app.modules.optimization_poc.models.truck import Truck3D, target_z_from_rank
 from app.modules.optimization_poc.schema import Placement
 from app.modules.optimization_poc.validators import (
@@ -48,25 +48,46 @@ def build_candidate(
 
 
 def orientations(package: Package3D, allow_rotation: bool) -> list[tuple[float, float, float, str]]:
-    base = (package.ancho_cm, package.alto_cm, package.largo_cm)
-    if not allow_rotation or is_upright_appliance(package):
-        return [(base[0], base[1], base[2], "LWH")]
+    results = base_constrained_orientations(package)
+    if not allow_rotation or not package.permite_rotacion:
+        return results[:1]
+    return results
 
-    if not package.permite_rotacion:
-        if allows_controlled_thin_rotation(package):
-            return controlled_thin_rotations(base)
-        return [(base[0], base[1], base[2], "LWH")]
 
-    labels = ["WHD", "WDH", "HWD", "HDW", "DWH", "DHW"]
-    results: list[tuple[float, float, float, str]] = []
-    seen = set()
+def base_constrained_orientations(
+    package: Package3D,
+) -> list[tuple[float, float, float, str]]:
+    """Return the two horizontal rotations compatible with the selected base."""
+    length = package.largo_cm
+    width = package.ancho_cm
+    height = package.alto_cm
+    selected_base = (package.orientacion_base or "LARGO_ANCHO").upper()
 
-    for index, dims in enumerate(permutations(base, 3)):
-        if dims in seen:
+    if selected_base == "LARGO_ALTO":
+        candidates = [
+            (length, width, height, "BASE_LARGO_ALTO_0"),
+            (height, width, length, "BASE_LARGO_ALTO_90"),
+        ]
+    elif selected_base == "ANCHO_ALTO":
+        candidates = [
+            (width, length, height, "BASE_ANCHO_ALTO_0"),
+            (height, length, width, "BASE_ANCHO_ALTO_90"),
+        ]
+    else:
+        candidates = [
+            (length, height, width, "BASE_LARGO_ANCHO_0"),
+            (width, height, length, "BASE_LARGO_ANCHO_90"),
+        ]
+
+    deduped: list[tuple[float, float, float, str]] = []
+    seen: set[tuple[float, float, float]] = set()
+    for candidate in candidates:
+        dimensions = candidate[:3]
+        if dimensions in seen:
             continue
-        seen.add(dims)
-        results.append((dims[0], dims[1], dims[2], labels[min(index, len(labels) - 1)]))
-    return sorted(results, key=lambda item: orientation_sort_key(item[0], item[1], item[2]))
+        seen.add(dimensions)
+        deduped.append(candidate)
+    return deduped
 
 
 def orientation_sort_key(width: float, height: float, depth: float) -> tuple[float, float, float, float]:
@@ -452,19 +473,11 @@ def fits_in_space(package: Package3D, space: dict[str, float]) -> bool:
 
 
 def generate_rotations(package: Package3D) -> list[tuple[float, float, float]]:
-    original = [(package.width, package.height, package.length)]
-    if is_upright_appliance(package):
-        return original
-    if not package.permite_rotacion:
-        if allows_controlled_thin_rotation(package):
-            return [(width, height, length) for width, height, length, _ in controlled_thin_rotations((package.width, package.height, package.length))]
-        return original
-
-    all_rotations = list(dict.fromkeys(permutations((package.width, package.height, package.length), 3)))
-    return sorted(
-        [(width, height, length) for width, height, length in all_rotations],
-        key=lambda item: orientation_sort_key(item[0], item[1], item[2]),
-    )
+    rotations = [
+        (width, height, length)
+        for width, height, length, _ in base_constrained_orientations(package)
+    ]
+    return rotations if package.permite_rotacion else rotations[:1]
 
 
 def split_space(
