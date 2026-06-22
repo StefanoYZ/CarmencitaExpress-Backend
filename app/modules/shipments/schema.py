@@ -10,6 +10,7 @@ from app.modules.shipments.constants import (
 )
 
 EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+BASE_ORIENTATION_VALUES = {"LARGO_ANCHO", "LARGO_ALTO", "ANCHO_ALTO"}
 
 
 class ShipmentPayloadBase(BaseModel):
@@ -38,6 +39,7 @@ class ShipmentPayloadBase(BaseModel):
     width_cm: float = Field(alias="ancho_cm")
     height_cm: float = Field(alias="alto_cm")
     fragility: str = Field(alias="fragilidad")
+    base_orientation: str | None = Field(default=None, alias="orientacion_base")
 
     @field_validator("sender_document_type", "sender_document_number")
     @classmethod
@@ -149,6 +151,18 @@ class ShipmentPayloadBase(BaseModel):
             raise ValueError("tipo_contenido cannot be empty")
         return normalized
 
+    @field_validator("base_orientation")
+    @classmethod
+    def normalize_base_orientation(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip().upper()
+        if normalized not in BASE_ORIENTATION_VALUES:
+            raise ValueError(
+                "orientacion_base must be LARGO_ANCHO, LARGO_ALTO or ANCHO_ALTO"
+            )
+        return normalized
+
     @model_validator(mode="after")
     def validate_document_numbers(self):
         _validate_document_number(self.sender_document_type, self.sender_document_number, "remitente_numero_documento")
@@ -165,6 +179,10 @@ class ShipmentPayloadBase(BaseModel):
             for dimension in (self.length_cm, self.width_cm, self.height_cm)
         ):
             raise ValueError("package dimensions must be greater than 0")
+        if self.content_type != "DOCUMENTOS" and not self.base_orientation:
+            raise ValueError("orientacion_base is required for packages")
+        if self.content_type == "DOCUMENTOS":
+            self.base_orientation = None
         return self
 
 
@@ -203,6 +221,7 @@ class ShipmentResponse(BaseModel):
     width_cm: float = Field(alias="ancho_cm")
     height_cm: float = Field(alias="alto_cm")
     fragility: str = Field(alias="fragilidad")
+    base_orientation: str | None = Field(default=None, alias="orientacion_base")
     registration_origin: str | None = Field(default=None, alias="origen_registro")
     status: str = Field(alias="estado")
     cancellation_reason: str | None = Field(default=None, alias="motivo_anulacion")

@@ -8,7 +8,6 @@ from app.modules.optimization_poc.utils.geometry import (
     dense_valid_candidates,
     fits_dimensions_in_space,
     generate_rotations,
-    projected_bounding_volume,
     space_volume,
     split_space,
     support_ratio,
@@ -71,13 +70,48 @@ def _placement_score(
     truck: Truck3D,
     placed: list[Placement],
 ) -> tuple[float, ...]:
+    projected_depth = max(
+        [candidate.z + candidate.depth, *[item.z + item.depth for item in placed]]
+    )
+    projected_width = max(
+        [candidate.x + candidate.width, *[item.x + item.width for item in placed]]
+    )
+    projected_height = max(
+        [candidate.y + candidate.height, *[item.y + item.height for item in placed]]
+    )
     return (
-        round(projected_bounding_volume(candidate, placed), 3),
+        round(projected_depth / max(truck.largo_cm, 1.0), 6),
+        round(
+            _projected_void_ratio(
+                candidate,
+                placed,
+                projected_width,
+                projected_height,
+                projected_depth,
+            ),
+            6,
+        ),
         round(1.0 - contact_score(candidate, truck, placed), 6),
         round(1.0 - support_ratio(candidate, placed), 6),
         round(candidate.y, 3),
         round(candidate.x, 3),
     )
+
+
+def _projected_void_ratio(
+    candidate: Placement,
+    placed: list[Placement],
+    projected_width: float,
+    projected_height: float,
+    projected_depth: float,
+) -> float:
+    envelope_volume = projected_width * projected_height * projected_depth
+    if envelope_volume <= 0:
+        return 0.0
+
+    occupied_volume = candidate.width * candidate.height * candidate.depth
+    occupied_volume += sum(item.width * item.height * item.depth for item in placed)
+    return max(envelope_volume - occupied_volume, 0.0) / envelope_volume
 
 
 def best_fit_decreasing_3d_algorithm(
