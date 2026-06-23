@@ -1,9 +1,10 @@
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 
 from sqlalchemy import desc, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.core.business_time import business_today
 from app.modules.shipments.constants import (
     CANCELED_STATUS,
     DELIVERED_STATUS,
@@ -45,8 +46,12 @@ PROTECTED_UPDATE_FIELDS = {
 NON_PERSISTED_PAYLOAD_FIELDS = {"sender_email", "recipient_email"}
 
 
+def expected_shipment_code_prefix() -> str:
+    return SHIPMENT_CODE_WEEKDAY[business_today().isoweekday()]
+
+
 def generate_shipment_code(db: Session) -> str:
-    weekday_letter = SHIPMENT_CODE_WEEKDAY[date.today().isoweekday()]
+    weekday_letter = expected_shipment_code_prefix()
     next_sequence = (db.query(func.max(Shipment.id)).scalar() or 0) + 1
 
     while True:
@@ -78,6 +83,8 @@ def create_pre_registration(db: Session, shipment_data: ShipmentPreRegistrationC
 
 
 def _commit_new_shipment_with_code_retry(db: Session, shipment: Shipment) -> Shipment:
+    if not shipment.shipment_code.startswith(expected_shipment_code_prefix()):
+        shipment.shipment_code = generate_shipment_code(db)
     try:
         with db.begin_nested():
             db.add(shipment)

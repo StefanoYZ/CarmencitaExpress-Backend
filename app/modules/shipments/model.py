@@ -1,7 +1,6 @@
-from datetime import datetime, timezone
-
 from sqlalchemy import Column, DateTime, Float, Integer, String, Text
 
+from app.core.business_time import business_now
 from app.core.database import Base
 
 
@@ -42,10 +41,10 @@ class Shipment(Base):
     digital_signature_base64 = Column("firma_digital_base64", Text, nullable=True)
     security_key = Column("clave_seguridad", String(50), nullable=True)
 
-    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=business_now, nullable=False)
     updated_at = Column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
+        default=business_now,
+        onupdate=business_now,
         nullable=False,
     )
