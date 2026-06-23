@@ -1,11 +1,10 @@
 ﻿import json
-from datetime import date
 from pathlib import Path
 from random import Random
 
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.core.business_time import business_day_utc_bounds
 from app.modules.optimization_poc.models.package import normalize_destination
 # from app.modules.optimization_poc.models.package import Package3D, is_upright_appliance
 from app.modules.optimization_poc.schema import Package, Truck
@@ -59,11 +58,13 @@ OPTIMIZABLE_SHIPMENT_STATUSES = {
 
 
 def list_registered_packages(db: Session, limit: int | None = None) -> list[Package]:
+    day_start, day_end = business_day_utc_bounds()
     query = (
         db.query(Shipment)
         .filter(
             Shipment.status.in_(OPTIMIZABLE_SHIPMENT_STATUSES),
-            func.date(Shipment.created_at) == date.today(),
+            Shipment.created_at >= day_start,
+            Shipment.created_at <= day_end,
         )
         .order_by(Shipment.created_at.asc(), Shipment.id.asc())
     )
@@ -77,12 +78,14 @@ def list_registered_packages_by_codes(db: Session, codes: list[str]) -> list[Pac
     normalized_codes = [code.strip().upper() for code in codes if code and code.strip()]
     if not normalized_codes:
         return []
+    day_start, day_end = business_day_utc_bounds()
     shipments = (
         db.query(Shipment)
         .filter(
             Shipment.status.in_(OPTIMIZABLE_SHIPMENT_STATUSES),
             Shipment.shipment_code.in_(normalized_codes),
-            func.date(Shipment.created_at) == date.today(),
+            Shipment.created_at >= day_start,
+            Shipment.created_at <= day_end,
         )
         .all()
     )

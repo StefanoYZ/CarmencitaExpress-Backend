@@ -6,6 +6,7 @@ from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, declarative_base, sessionmaker
 
+from app.core.business_time import BUSINESS_TIMEZONE_NAME
 from app.core.config import settings
 
 
@@ -15,7 +16,10 @@ engine = create_engine(
     settings.sqlalchemy_database_url,
     pool_pre_ping=True,
     pool_recycle=300,
-    connect_args={"connect_timeout": 10},
+    connect_args={
+        "connect_timeout": 10,
+        "options": f"-c timezone={BUSINESS_TIMEZONE_NAME}",
+    },
 )
 
 SessionLocal = sessionmaker(
