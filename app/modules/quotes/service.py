@@ -3,6 +3,7 @@ import unicodedata
 from sqlalchemy.orm import Session
 
 from app.modules.quotes.schema import QuoteResponse
+from app.modules.measurement_logs.service import start_service_phase
 from app.modules.shipments.constants import CANCELED_STATUS
 from app.modules.shipments.model import Shipment
 from app.modules.shipments.service import get_shipment, mark_shipment_as_quoted
@@ -61,6 +62,7 @@ def calculate_quote(db: Session, shipment_id: int) -> QuoteResponse | None:
     if shipment.status == CANCELED_STATUS:
         raise ValueError("No se puede cotizar una encomienda anulada")
     quote = calculate_quote_for_shipment(shipment)
+    start_service_phase(db, "registro", encomienda_id=shipment.id, timestamp_inicio=shipment.created_at)
     mark_shipment_as_quoted(db, shipment)
     return quote
 

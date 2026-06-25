@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.modules.payments.service import PaymentGatewayError, process_payment
 from app.core.config import MERCADOPAGO_PUBLIC_KEY
+from app.modules.measurement_logs.service import ensure_boleta_log_after_payment, finish_service_phase
 from app.modules.charge_logs.service import (
     CARD_MODALITY,
     FAILED_RESULT,
@@ -78,6 +79,20 @@ def create_payment(
         raise HTTPException(
             status_code=api_status if 400 <= api_status < 500 else 502,
             detail=detail,
+        )
+
+    if str(result.get("payment_status") or "").lower() == "approved" and data.get("encomienda_id"):
+        shipment_id = int(data["encomienda_id"])
+        payment_id = int(result["id"]) if result.get("id") else None
+        try:
+            finish_service_phase(db, "registro", encomienda_id=shipment_id, pago_id=payment_id)
+        except (LookupError, ValueError):
+            pass
+        ensure_boleta_log_after_payment(
+            db,
+            encomienda_id=shipment_id,
+            pago_id=payment_id,
+            usuario=user,
         )
 
     return result

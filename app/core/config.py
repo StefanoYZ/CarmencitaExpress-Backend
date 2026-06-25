@@ -37,6 +37,11 @@ class Settings(BaseSettings):
     default_admin_username: str = Field(default="admin", alias="DEFAULT_ADMIN_USERNAME")
     default_admin_password: str = Field(default="admin123", alias="DEFAULT_ADMIN_PASSWORD")
 
+    # Asistente Virtual / LLM
+    gemini_api_key: Optional[str] = Field(default=None, alias="GEMINI_API_KEY")
+    gemini_model: str = Field(default="gemini-1.5-flash", alias="GEMINI_MODEL")
+    assistant_llm_enabled: bool = Field(default=False, alias="ASSISTANT_LLM_ENABLED")
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
