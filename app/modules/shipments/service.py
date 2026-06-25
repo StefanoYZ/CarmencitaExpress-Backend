@@ -4,6 +4,11 @@ import json
 from sqlalchemy.orm import Session
 
 from app.modules.clients.service import upsert_client_from_person_data
+from app.modules.measurement_logs.service import (
+    ensure_boleta_log_after_payment,
+    finish_service_phase,
+    start_service_phase,
+)
 from app.modules.shipments import repository
 from app.modules.shipments.constants import (
     CANCELED_STATUS,
@@ -29,7 +34,14 @@ def create_shipment(db: Session, payload: ShipmentCreate) -> Shipment:
 
 def create_pre_registration(db: Session, payload: ShipmentPreRegistrationCreate) -> Shipment:
     _upsert_clients_from_shipment_payload(db, payload, commit=False)
-    return repository.create_pre_registration(db, payload)
+    shipment = repository.create_pre_registration(db, payload)
+    start_service_phase(
+        db,
+        "registro",
+        encomienda_id=shipment.id,
+        timestamp_inicio=shipment.created_at,
+    )
+    return shipment
 
 
 def list_shipments(db: Session) -> list[Shipment]:
@@ -56,7 +68,19 @@ def confirm_pre_registration(db: Session, shipment_id: int) -> Shipment | None:
         raise ValueError("No se puede confirmar una encomienda anulada")
     if shipment.status != PRE_REGISTERED_STATUS:
         raise ValueError(f"No se puede confirmar una encomienda en estado {shipment.status}")
-    return repository.confirm_pre_registration(db, shipment)
+    shipment = repository.confirm_pre_registration(db, shipment)
+    try:
+        finish_service_phase(db, "registro", encomienda_id=shipment.id)
+    except LookupError:
+        start_service_phase(
+            db,
+            "registro",
+            encomienda_id=shipment.id,
+            timestamp_inicio=shipment.created_at,
+        )
+        finish_service_phase(db, "registro", encomienda_id=shipment.id)
+    ensure_boleta_log_after_payment(db, encomienda_id=shipment.id)
+    return shipment
 
 
 def update_shipment(db: Session, shipment_id: int, payload: ShipmentUpdate) -> Shipment | None:
@@ -233,12 +257,17 @@ def mark_as_delivered(db: Session, shipment_id: int, payload: DeliveryRequest) -
         raise ValueError("El DNI del receptor no coincide con el destinatario")
     if shipment.security_key and payload.security_key != shipment.security_key:
         raise ValueError("La clave de seguridad no coincide")
-    return repository.mark_as_delivered(
+    delivered = repository.mark_as_delivered(
         db=db,
         shipment=shipment,
         receiver_document=payload.receiver_document,
         signature_base64=payload.signature_base64,
     )
+    try:
+        finish_service_phase(db, "entrega", encomienda_id=delivered.id)
+    except (LookupError, ValueError):
+        pass
+    return delivered
 
 
 def _build_qr_png(qr_payload: LabelQrPayload) -> bytes:
