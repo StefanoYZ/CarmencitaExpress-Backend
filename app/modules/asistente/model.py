@@ -90,6 +90,31 @@ class AsistenteBaseConocimiento(Base):
     )
 
 
+class AsistenteBusquedaWebCache(Base):
+    """Caché de búsquedas web (p. ej. sedes de agencias para recojo externo).
+
+    Evita repetir llamadas al proveedor de búsqueda: la primera consulta se guarda
+    y las siguientes con la misma clave se responden al instante desde la BD.
+    """
+
+    __tablename__ = "asistente_busquedas_web_cache"
+
+    id = Column(Integer, primary_key=True, index=True)
+    consulta_clave = Column(String(120), unique=True, nullable=False, index=True)
+    consulta_original = Column(Text, nullable=True)
+    respuesta = Column(Text, nullable=False)
+    resultados_json = Column(Text, nullable=True)
+    veces_consultada = Column(Integer, default=1, nullable=False)
+
+    created_at = Column(DateTime(timezone=True), default=business_now, nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True),
+        default=business_now,
+        onupdate=business_now,
+        nullable=False,
+    )
+
+
 class TiposContenidoTransporte(Base):
     __tablename__ = "tipos_contenido_transporte"
 

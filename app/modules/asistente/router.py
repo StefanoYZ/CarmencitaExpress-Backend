@@ -17,8 +17,11 @@ from app.modules.asistente.schema import (
     SolicitudRecojoResponse,
     TipoContenidoCreate,
     TipoContenidoResponse,
+    ValidacionCoherenciaRequest,
+    ValidacionCoherenciaResponse,
 )
 from app.modules.asistente import service
+from app.core.config import settings
 
 
 asistente_router = APIRouter(prefix="/asistente", tags=["asistente"])
@@ -27,11 +30,44 @@ base_conocimiento_router = APIRouter(prefix="/asistente/base-conocimiento", tags
 tipos_contenido_router = APIRouter(prefix="/asistente/tipos-contenido", tags=["asistente"])
 
 
+# ── Status / Diagnóstico ──────────────────────────────────────────────────────
+
+@asistente_router.get("/status")
+def asistente_status() -> dict:
+    """Estado de configuración del asistente (no expone claves completas)."""
+    from app.services.asistente_llm_service import _call_groq_raw
+    gk = settings.groq_api_key or ""
+    result: dict = {
+        "llm_enabled": settings.assistant_llm_enabled,
+        "groq_key_set": bool(gk),
+        "groq_model": settings.groq_model,
+        "groq_test": None,
+        "groq_error": None,
+    }
+    if settings.assistant_llm_enabled and gk:
+        try:
+            result["groq_test"] = _call_groq_raw("Responde solo: ok")
+        except Exception as exc:
+            result["groq_error"] = f"{type(exc).__name__}: {exc}"
+    return result
+
+
 # ── Chat ──────────────────────────────────────────────────────────────────────
 
 @asistente_router.post("/chat", response_model=ChatResponse)
 def chat_endpoint(payload: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
     return service.process_chat(db, payload)
+
+
+# ── Validación de coherencia del paquete ──────────────────────────────────────
+
+@asistente_router.post("/validar-coherencia", response_model=ValidacionCoherenciaResponse)
+def validar_coherencia_endpoint(
+    payload: ValidacionCoherenciaRequest,
+    db: Session = Depends(get_db),
+) -> ValidacionCoherenciaResponse:
+    resultado = service.validar_coherencia_paquete(db, payload)
+    return ValidacionCoherenciaResponse(**resultado)
 
 
 # ── Recojo Externo ────────────────────────────────────────────────────────────

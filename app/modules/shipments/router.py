@@ -1,6 +1,6 @@
 from datetime import date
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
@@ -11,6 +11,7 @@ from app.modules.shipments.reports import (
     generate_operational_report_pdf,
 )
 from app.modules.shipments.schema import (
+    ConfirmPreRegistrationRequest,
     DeliveryRequest,
     DeliveryResponse,
     ShipmentCancelRequest,
@@ -28,6 +29,7 @@ from app.modules.shipments.service import (
     confirm_pre_registration,
     create_pre_registration,
     create_shipment,
+    delete_expired_pre_registration,
     generate_label_pdf,
     generate_label_qr_png,
     get_label_data,
@@ -130,9 +132,15 @@ def get_shipment_endpoint(encomienda_id: int, db: Session = Depends(get_db)) -> 
 
 
 @router.post("/{encomienda_id}/confirmar-registro", response_model=ShipmentResponse)
-def confirm_pre_registration_endpoint(encomienda_id: int, db: Session = Depends(get_db)) -> ShipmentResponse:
+def confirm_pre_registration_endpoint(
+    encomienda_id: int,
+    payload: ConfirmPreRegistrationRequest | None = Body(default=None),
+    db: Session = Depends(get_db),
+) -> ShipmentResponse:
     try:
-        shipment = confirm_pre_registration(db, encomienda_id)
+        shipment = confirm_pre_registration(
+            db, encomienda_id, base_orientation=payload.base_orientation if payload else None
+        )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     if shipment is None:
@@ -163,6 +171,24 @@ def cancel_shipment_with_reason_endpoint(
 ) -> ShipmentDeleteResponse:
     try:
         shipment = cancel_shipment_with_reason(db, encomienda_id, payload.reason)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    if shipment is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shipment not found")
+    return _cancel_response(shipment)
+
+
+@router.delete(
+    "/{encomienda_id}/pre-registro-vencido",
+    response_model=ShipmentDeleteResponse,
+)
+def delete_expired_pre_registration_endpoint(
+    encomienda_id: int,
+    db: Session = Depends(get_db),
+    _current_user=Depends(require_permission("encomiendas.write")),
+) -> ShipmentDeleteResponse:
+    try:
+        shipment = delete_expired_pre_registration(db, encomienda_id)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     if shipment is None:

@@ -192,3 +192,28 @@ class ChatResponse(BaseModel):
     accion_sugerida: str | None = None
     datos_extraidos: dict[str, Any] | None = None
     log_id: int | None = None
+
+
+# ── Validación de coherencia del paquete ──────────────────────────────────────
+
+class ValidacionCoherenciaRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    tipo_contenido: str | None = None
+    descripcion: str | None = None
+    peso_kg: float | str | None = None
+    largo_cm: float | str | None = None
+    ancho_cm: float | str | None = None
+    alto_cm: float | str | None = None
+    fragilidad: str | None = None
+    orientacion_base: str | None = None
+
+
+class AdvertenciaCoherencia(BaseModel):
+    campo: str
+    mensaje: str
+
+
+class ValidacionCoherenciaResponse(BaseModel):
+    tiene_advertencias: bool
+    advertencias: list[AdvertenciaCoherencia] = Field(default_factory=list)

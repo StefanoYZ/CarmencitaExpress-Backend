@@ -37,10 +37,17 @@ class Settings(BaseSettings):
     default_admin_username: str = Field(default="admin", alias="DEFAULT_ADMIN_USERNAME")
     default_admin_password: str = Field(default="admin123", alias="DEFAULT_ADMIN_PASSWORD")
 
-    # Asistente Virtual / LLM
-    gemini_api_key: Optional[str] = Field(default=None, alias="GEMINI_API_KEY")
-    gemini_model: str = Field(default="gemini-1.5-flash", alias="GEMINI_MODEL")
+    # Asistente Virtual / LLM — Groq
+    groq_api_key: Optional[str] = Field(default=None, alias="GROQ_API_KEY")
+    groq_model: str = Field(default="llama-3.1-8b-instant", alias="GROQ_MODEL")
     assistant_llm_enabled: bool = Field(default=False, alias="ASSISTANT_LLM_ENABLED")
+
+    # Búsqueda web (recojo externo: sedes de agencias). Provider por defecto: Serper
+    # (https://serper.dev). Si no se configura la key, el asistente pide la dirección
+    # exacta en lugar de buscar en internet.
+    search_api_key: Optional[str] = Field(default=None, alias="SEARCH_API_KEY")
+    search_api_url: str = Field(default="https://google.serper.dev/search", alias="SEARCH_API_URL")
+    search_provider: str = Field(default="serper", alias="SEARCH_PROVIDER")
 
     model_config = SettingsConfigDict(
         env_file=".env",
