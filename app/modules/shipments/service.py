@@ -10,6 +10,8 @@ from app.modules.measurement_logs.service import (
     start_service_phase,
 )
 from app.modules.shipments import repository
+from datetime import datetime, timedelta, timezone
+
 from app.modules.shipments.constants import (
     CANCELED_STATUS,
     DELIVERED_STATUS,
@@ -18,6 +20,7 @@ from app.modules.shipments.constants import (
 )
 from app.modules.shipments.model import Shipment
 from app.modules.shipments.schema import (
+    BASE_ORIENTATION_VALUES,
     DeliveryRequest,
     LabelQrPayload,
     ShipmentCreate,
@@ -60,7 +63,9 @@ def mark_shipment_as_quoted(db: Session, shipment: Shipment) -> Shipment:
     return repository.mark_shipment_as_quoted(db, shipment)
 
 
-def confirm_pre_registration(db: Session, shipment_id: int) -> Shipment | None:
+def confirm_pre_registration(
+    db: Session, shipment_id: int, base_orientation: str | None = None
+) -> Shipment | None:
     shipment = repository.get_shipment_by_id(db, shipment_id)
     if shipment is None:
         return None
@@ -68,6 +73,17 @@ def confirm_pre_registration(db: Session, shipment_id: int) -> Shipment | None:
         raise ValueError("No se puede confirmar una encomienda anulada")
     if shipment.status != PRE_REGISTERED_STATUS:
         raise ValueError(f"No se puede confirmar una encomienda en estado {shipment.status}")
+    # Si el cliente eligió la cara/base al pagar en línea (p. ej. un pre-registro
+    # creado por CarmiBot que aún no la tenía), se asigna antes de validar.
+    if base_orientation and shipment.content_type != "DOCUMENTOS" and not shipment.base_orientation:
+        normalized = base_orientation.strip().upper()
+        if normalized not in BASE_ORIENTATION_VALUES:
+            raise ValueError("La cara/base seleccionada no es válida")
+        shipment.base_orientation = normalized
+        db.add(shipment)
+        db.flush()
+    if shipment.content_type != "DOCUMENTOS" and not shipment.base_orientation:
+        raise ValueError("Falta seleccionar la cara/base del paquete antes de confirmar el pre-registro")
     shipment = repository.confirm_pre_registration(db, shipment)
     try:
         finish_service_phase(db, "registro", encomienda_id=shipment.id)
@@ -110,6 +126,29 @@ def cancel_shipment_with_reason(db: Session, shipment_id: int, reason: str) -> S
 
 def cancel_shipment(db: Session, shipment_id: int) -> Shipment | None:
     return cancel_shipment_with_reason(db, shipment_id, "Anulacion solicitada desde endpoint DELETE")
+
+
+PRE_REGISTRO_EXPIRY_DAYS = 3
+
+
+def delete_expired_pre_registration(db: Session, shipment_id: int) -> Shipment | None:
+    """Elimina (anula) un pre-registro que lleva más de PRE_REGISTRO_EXPIRY_DAYS días sin confirmarse."""
+    shipment = repository.get_shipment_by_id(db, shipment_id)
+    if shipment is None:
+        return None
+    if shipment.status != PRE_REGISTERED_STATUS:
+        raise ValueError("Solo se pueden eliminar encomiendas en estado PRE_REGISTRADA")
+    age = datetime.now(timezone.utc) - shipment.created_at.replace(tzinfo=timezone.utc)
+    if age < timedelta(days=PRE_REGISTRO_EXPIRY_DAYS):
+        raise ValueError(
+            f"El pre-registro tiene menos de {PRE_REGISTRO_EXPIRY_DAYS} días. "
+            "Solo se pueden eliminar pre-registros vencidos."
+        )
+    return repository.cancel_shipment_with_reason(
+        db,
+        shipment,
+        f"Pre-registro eliminado por vencimiento ({PRE_REGISTRO_EXPIRY_DAYS} días sin confirmar)",
+    )
 
 
 def get_label_data(db: Session, shipment_id: int) -> ShipmentLabelResponse | None:
