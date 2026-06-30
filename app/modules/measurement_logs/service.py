@@ -7,7 +7,7 @@ from typing import Literal
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
-from app.core.business_time import business_now, business_today
+from app.core.business_time import business_now, business_today, ensure_business_tz
 from app.core.security import decode_access_token
 from app.modules.measurement_logs.model import LogCargaPaquete, LogEmisionBoleta, LogServicioTransporte
 from app.modules.users import repository as users_repository
@@ -302,7 +302,7 @@ def list_service_logs(
 def _finish_boleta_log(log: LogEmisionBoleta, timestamp_fin: datetime) -> None:
     if log.timestamp_fin is not None:
         return
-    if timestamp_fin < log.timestamp_inicio:
+    if ensure_business_tz(timestamp_fin) < ensure_business_tz(log.timestamp_inicio):
         raise ValueError("timestamp_fin no puede ser menor que timestamp_inicio")
     log.timestamp_fin = timestamp_fin
     log.tiempo_ms = _duration_ms(log.timestamp_inicio, timestamp_fin)
@@ -319,7 +319,7 @@ def _finish_service_phase(log: LogServicioTransporte, phase: Phase, timestamp_fi
     current_end = getattr(log, end_field)
     if current_end is not None:
         return
-    if timestamp_fin < start_value:
+    if ensure_business_tz(timestamp_fin) < ensure_business_tz(start_value):
         raise ValueError(f"timestamp_fin_{phase} no puede ser menor que timestamp_inicio_{phase}")
     setattr(log, end_field, timestamp_fin)
     setattr(log, duration_field, _duration_ms(start_value, timestamp_fin))
@@ -328,6 +328,8 @@ def _finish_service_phase(log: LogServicioTransporte, phase: Phase, timestamp_fi
 
 
 def _duration_ms(start: datetime, end: datetime) -> int:
+    start = ensure_business_tz(start)
+    end = ensure_business_tz(end)
     return int((end - start).total_seconds() * 1000)
 
 
@@ -554,7 +556,7 @@ def finalizar_paquete_carga(
         raise LookupError(f"Log abierto no encontrado para orden {orden_carga_id} paquete {encomienda_id}")
 
     fin = timestamp_fin or business_now()
-    if fin < log.timestamp_inicio:
+    if ensure_business_tz(fin) < ensure_business_tz(log.timestamp_inicio):
         raise ValueError("timestamp_fin no puede ser menor que timestamp_inicio")
     log.timestamp_fin = fin
     log.tiempo_carga_ms = _duration_ms(log.timestamp_inicio, fin)

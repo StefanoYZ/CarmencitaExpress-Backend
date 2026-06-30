@@ -1,6 +1,10 @@
 from itertools import permutations
 
-from app.modules.optimization_poc.models.package import Package3D, destination_rank
+from app.modules.optimization_poc.models.package import (
+    Package3D,
+    destination_rank,
+    is_upright_appliance,
+)
 from app.modules.optimization_poc.models.truck import Truck3D, target_z_from_rank
 from app.modules.optimization_poc.schema import Placement
 from app.modules.optimization_poc.validators import (
@@ -47,7 +51,17 @@ def build_candidate(
     )
 
 
+def upright_appliance_orientation(package: Package3D) -> tuple[float, float, float, str]:
+    """Orientación única de un electrodoméstico vertical: conserva su alto hacia arriba.
+
+    No se permite rotación (ni siquiera de la huella) para evitar que viaje acostado.
+    """
+    return (package.ancho_cm, package.alto_cm, package.largo_cm, "LWH")
+
+
 def orientations(package: Package3D, allow_rotation: bool) -> list[tuple[float, float, float, str]]:
+    if is_upright_appliance(package):
+        return [upright_appliance_orientation(package)]
     results = base_constrained_orientations(package)
     if not allow_rotation or not package.permite_rotacion:
         return results[:1]
@@ -473,6 +487,9 @@ def fits_in_space(package: Package3D, space: dict[str, float]) -> bool:
 
 
 def generate_rotations(package: Package3D) -> list[tuple[float, float, float]]:
+    if is_upright_appliance(package):
+        width, height, length, _ = upright_appliance_orientation(package)
+        return [(width, height, length)]
     rotations = [
         (width, height, length)
         for width, height, length, _ in base_constrained_orientations(package)

@@ -164,6 +164,43 @@ def test_sunat_beta_client_contract(
     assert receipt.cdr_zip == "TEST_CDR"
 
 
+def test_boleta_rechazada_sin_confirmar_pago(
+    api_client,
+    valid_shipment_payload,
+    monkeypatch,
+):
+    """CN-19: no se puede emitir boleta si el pago no está confirmado."""
+    monkeypatch.setattr(settings, "sunat_env", "mock")
+    created = api_client.post("/api/v1/encomiendas", json=valid_shipment_payload).json()
+
+    response = api_client.post(
+        "/api/v1/sunat/boletas/emitir-desde-encomienda",
+        json={"encomienda_id": created["id"], "confirmar_pago": False},
+    )
+
+    assert response.status_code == 400, response.text
+    assert "payment" in response.json()["detail"].lower()
+
+
+def test_boleta_rechazada_para_encomienda_preregistrada(
+    api_client,
+    valid_shipment_payload,
+    monkeypatch,
+):
+    """CN-19: una encomienda solo pre-registrada (sin registrar/pagar) no emite boleta."""
+    monkeypatch.setattr(settings, "sunat_env", "mock")
+    pre = api_client.post("/api/v1/encomiendas/pre-registro", json=valid_shipment_payload)
+    assert pre.status_code == 201, pre.text
+
+    response = api_client.post(
+        "/api/v1/sunat/boletas/emitir-desde-encomienda",
+        json={"encomienda_id": pre.json()["id"], "confirmar_pago": True},
+    )
+
+    assert response.status_code == 400, response.text
+    assert "pre-registrada" in response.json()["detail"].lower()
+
+
 def test_sunat_beta_pdf_and_xml_reuse_persisted_receipt(
     api_client,
     db_session,

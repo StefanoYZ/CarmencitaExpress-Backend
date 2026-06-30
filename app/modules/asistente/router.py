@@ -35,7 +35,7 @@ tipos_contenido_router = APIRouter(prefix="/asistente/tipos-contenido", tags=["a
 @asistente_router.get("/status")
 def asistente_status() -> dict:
     """Estado de configuración del asistente (no expone claves completas)."""
-    from app.services.asistente_llm_service import _call_groq_raw
+    from app.integrations.llm import _call_groq_raw
     gk = settings.groq_api_key or ""
     result: dict = {
         "llm_enabled": settings.assistant_llm_enabled,

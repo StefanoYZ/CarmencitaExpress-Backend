@@ -4,7 +4,7 @@ from random import Random
 
 from sqlalchemy.orm import Session
 
-from app.core.business_time import business_day_utc_bounds
+from app.core.business_time import business_today, ensure_business_tz
 from app.modules.optimization_poc.models.package import normalize_destination
 # from app.modules.optimization_poc.models.package import Package3D, is_upright_appliance
 from app.modules.optimization_poc.schema import Package, Truck
@@ -58,20 +58,24 @@ OPTIMIZABLE_SHIPMENT_STATUSES = {
 
 
 def list_registered_packages(db: Session, limit: int | None = None) -> list[Package]:
-    day_start, day_end = business_day_utc_bounds()
-    query = (
+    # Filtra por estado en SQL (portable) y por "día de negocio" en Python con
+    # ensure_business_tz, para no depender de cómo cada motor (SQLite/Postgres)
+    # almacena la zona horaria de created_at.
+    hoy = business_today()
+    shipments = (
         db.query(Shipment)
-        .filter(
-            Shipment.status.in_(OPTIMIZABLE_SHIPMENT_STATUSES),
-            Shipment.created_at >= day_start,
-            Shipment.created_at <= day_end,
-        )
+        .filter(Shipment.status.in_(OPTIMIZABLE_SHIPMENT_STATUSES))
         .order_by(Shipment.created_at.asc(), Shipment.id.asc())
+        .all()
     )
+    del_dia = [
+        shipment
+        for shipment in shipments
+        if ensure_business_tz(shipment.created_at).date() == hoy
+    ]
     if limit is not None:
-        query = query.limit(limit)
-    shipments = query.all()
-    return [_shipment_to_package(shipment) for shipment in shipments]
+        del_dia = del_dia[:limit]
+    return [_shipment_to_package(shipment) for shipment in del_dia]
 
 
 def list_registered_packages_by_codes(db: Session, codes: list[str]) -> list[Package]:
