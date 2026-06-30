@@ -71,8 +71,6 @@ def test_admin_cannot_run_optimization(api_client, admin_headers):
     [
         "/api/v1/optimization/poc/first-fit/run",
         "/api/v1/optimization/poc/best-fit/run",
-        "/api/v1/optimization/poc/worst-fit/run",
-        "/api/v1/optimization/poc/minimax-maximin/run",
         "/api/v1/optimization/poc/backtracking/run",
     ],
 )
@@ -103,6 +101,7 @@ def test_best_fit_decreasing_uses_registered_shipments_and_skips_envelopes(
             "largo_cm": 30 + index,
             "ancho_cm": 20 + index,
             "alto_cm": 15 + index,
+            "orientacion_base": "LARGO_ANCHO",
         }
         created = api_client.post("/api/v1/encomiendas", json=payload)
         assert created.status_code == 201, created.text

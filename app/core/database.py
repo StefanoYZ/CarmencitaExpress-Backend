@@ -44,9 +44,11 @@ def get_db() -> Generator[Session, None, None]:
 
 def create_db_tables(max_attempts: int = 5, retry_delay_seconds: int = 3) -> None:
     # Crea tablas nuevas y sincroniza columnas faltantes en desarrollo.
+    from app.modules.asistente import model as asistente_model  # noqa: F401
     from app.modules.clients import model as clients_model  # noqa: F401
     from app.modules.charge_logs import model as charge_logs_model  # noqa: F401
     from app.modules.destinations import model as destinations_model  # noqa: F401
+    from app.modules.measurement_logs import model as measurement_logs_model  # noqa: F401
     from app.modules.shipments import model as shipments_model  # noqa: F401
     from app.modules.sunat import model as sunat_model  # noqa: F401
     from app.modules.users import model as users_model  # noqa: F401

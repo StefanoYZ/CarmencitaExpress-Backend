@@ -3,6 +3,8 @@ from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.modules.measurement_logs.service import finish_open_boleta_log_by_shipment
+from app.modules.shipments.service import get_shipment_by_code
 from app.modules.sunat.exceptions import LycetClientError, SunatEmissionBlockedError
 from app.modules.sunat.pdf_service import generate_mock_receipt_pdf
 from app.modules.sunat.schema import ReceiptFromShipmentRequest, ReceiptResponse
@@ -52,6 +54,7 @@ def generate_beta_pdf_endpoint(payload: ReceiptFromShipmentRequest, db: Session 
     except LycetClientError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
+    finish_open_boleta_log_by_shipment(db, encomienda_id=payload.shipment_id)
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
@@ -78,12 +81,15 @@ def generate_beta_xml_endpoint(payload: ReceiptFromShipmentRequest, db: Session 
 
 
 @router.get("/boletas/mock/{serie}/{numero}/pdf")
-def download_mock_pdf_endpoint(serie: str, numero: str) -> Response:
+def download_mock_pdf_endpoint(serie: str, numero: str, db: Session = Depends(get_db)) -> Response:
     record = get_mock_receipt(serie, numero)
     if record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mock receipt not found")
 
     pdf_bytes = generate_mock_receipt_pdf(record)
+    shipment = get_shipment_by_code(db, record.shipment_code)
+    if shipment is not None:
+        finish_open_boleta_log_by_shipment(db, encomienda_id=shipment.id)
     filename = f"boleta_mock_{serie}_{numero}.pdf"
     return Response(
         content=pdf_bytes,

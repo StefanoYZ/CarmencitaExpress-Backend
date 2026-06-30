@@ -31,6 +31,7 @@ from app.modules.optimization_poc.schema import Package, Placement, RunRequest, 
 from app.modules.optimization_poc.utils.metrics import calculate_metrics
 from app.modules.optimization_poc.utils.progressive_loading import select_progressive_placement
 from app.modules.optimization_poc.validators import is_weight_allowed, recompute_supported_weights
+from app.modules.measurement_logs.service import start_service_phase
 
 
 def get_scenario(limit: int | None = None, db: Session | None = None) -> ScenarioResponse:
@@ -118,6 +119,9 @@ def _run_simulation(
     truck = build_truck(truck_schema)
     packing_algorithm = get_packing_algorithm(strategy_id)
     source_packages = packages_from_request(request, db=db)
+    if db is not None:
+        for package in source_packages:
+            start_service_phase(db, "carga", encomienda_id=package.id)
     packages = packing_algorithm.order_packages(
         [package for package in source_packages if package.requires_packing]
     )
