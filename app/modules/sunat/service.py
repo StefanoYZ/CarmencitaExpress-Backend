@@ -4,6 +4,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.modules.measurement_logs.service import link_boleta_log_to_receipt
 from app.modules.quotes.schema import QuoteResponse
 from app.modules.quotes.service import calculate_quote_for_shipment
 from app.modules.shipments.service import get_shipment
@@ -211,6 +212,7 @@ def issue_receipt_from_shipment(db: Session, shipment_id: int, confirm_payment: 
             request_payload=payload,
             raw_response=raw_response,
         )
+        link_boleta_log_to_receipt(db, encomienda_id=shipment.id, boleta_id=receipt.id)
         return _receipt_response(
             receipt,
             shipment.shipment_code,

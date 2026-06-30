@@ -16,6 +16,15 @@ from app.modules.sunat.router import router as sunat_router
 from app.modules.users.router import permissions_router, roles_router, users_router
 from app.modules.users.service import seed_initial_access_control
 from app.modules.destinations.service import seed_default_destinations
+from app.modules.asistente.router import (
+    asistente_router,
+    base_conocimiento_router,
+    logs_asistente_router,
+    tipos_contenido_router,
+)
+from app.modules.measurement_logs.router import boletas_router as measurement_boletas_router
+from app.modules.measurement_logs.router import carga_router as measurement_carga_router
+from app.modules.measurement_logs.router import servicio_router as measurement_servicio_router
 from app.modules.yape.router import router as yape_router
 
 app = FastAPI(title=settings.app_name)
@@ -43,6 +52,13 @@ app.include_router(reniec_router, prefix=settings.api_prefix)
 app.include_router(payments_router, prefix=settings.api_prefix)
 app.include_router(yape_router, prefix=settings.api_prefix)
 app.include_router(optimization_poc_router, prefix=settings.api_prefix)
+app.include_router(measurement_boletas_router, prefix=settings.api_prefix)
+app.include_router(measurement_servicio_router, prefix=settings.api_prefix)
+app.include_router(measurement_carga_router, prefix=settings.api_prefix)
+app.include_router(asistente_router, prefix=settings.api_prefix)
+app.include_router(logs_asistente_router, prefix=settings.api_prefix)
+app.include_router(base_conocimiento_router, prefix=settings.api_prefix)
+app.include_router(tipos_contenido_router, prefix=settings.api_prefix)
 
 
 @app.on_event("startup")
