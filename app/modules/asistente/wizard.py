@@ -662,6 +662,21 @@ def _crear_preregistro_desde_chat(db: Session, datos: dict, session_id: str):
         if fragilidad not in ("BAJA", "MEDIA", "ALTA"):
             fragilidad = "BAJA"
 
+        largo_cm = _f(datos.get("largo_cm")) or 30.0
+        ancho_cm = _f(datos.get("ancho_cm")) or 30.0
+        alto_cm = _f(datos.get("alto_cm")) or 30.0
+        # Elegir una base segura automáticamente: deja la dimensión más grande en
+        # vertical, lo que cumple la validación incluso para paquetes que deben ir
+        # parados (cocina, refrigeradora, frágiles, etc.). La secretaría puede
+        # reasignar la base al completar el cobro.
+        mayor = max(largo_cm, ancho_cm, alto_cm)
+        if mayor == alto_cm:
+            orientacion_base = "LARGO_ANCHO"
+        elif mayor == ancho_cm:
+            orientacion_base = "LARGO_ALTO"
+        else:
+            orientacion_base = "ANCHO_ALTO"
+
         payload = ShipmentPreRegistrationCreate.model_validate({
             "remitente_tipo_documento": "DNI",
             "remitente_numero_documento": str(datos.get("remitente_dni") or "").strip(),
@@ -676,11 +691,11 @@ def _crear_preregistro_desde_chat(db: Session, datos: dict, session_id: str):
             "descripcion": str(datos.get("descripcion") or "").strip(),
             "tipo_contenido": None,
             "peso_kg": _f(datos.get("peso_kg")) or 1.0,
-            "largo_cm": _f(datos.get("largo_cm")) or 30.0,
-            "ancho_cm": _f(datos.get("ancho_cm")) or 30.0,
-            "alto_cm": _f(datos.get("alto_cm")) or 30.0,
+            "largo_cm": largo_cm,
+            "ancho_cm": ancho_cm,
+            "alto_cm": alto_cm,
             "fragilidad": fragilidad,
-            "orientacion_base": "LARGO_ANCHO",
+            "orientacion_base": orientacion_base,
         })
         shipment = shipments_service.create_pre_registration(db, payload)
         # CarmiBot no tiene interfaz visual para que el cliente elija la cara/base.

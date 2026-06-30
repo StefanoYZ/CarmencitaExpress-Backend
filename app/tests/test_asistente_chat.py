@@ -134,3 +134,29 @@ def test_validar_coherencia_no_molesta_descripciones_reales(db_session):
     # Descripciones válidas no deben generar advertencia en la descripción.
     for real in ("ropa", "documentos varios", "repuestos de auto", "dvd"):
         assert "descripcion" not in _campos_advertidos(db_session, real), real
+
+
+def test_preregistro_chat_paquete_que_debe_ir_parado(db_session):
+    """Regresión: un paquete que debe ir parado (p. ej. 'cocina') fallaba al
+    pre-registrar desde el chat porque el wizard fijaba orientacion_base=LARGO_ANCHO.
+    Ahora el wizard elige una base segura según las dimensiones."""
+    from app.modules.asistente.wizard import _crear_preregistro_desde_chat
+
+    datos = {
+        "remitente_dni": "17935065",
+        "remitente_nombre": "JAIME ANGEL YEPEZ BENITES",
+        "remitente_telefono": "968222374",
+        "destinatario_dni": "76619947",
+        "destinatario_nombre": "ANGEL STEFANO YEPEZ ZAPATA",
+        "destinatario_telefono": "954684440",
+        "destino": "Shorey",
+        "descripcion": "cocina",
+        "peso_kg": "50",
+        "largo_cm": "120",
+        "ancho_cm": "50",
+        "alto_cm": "75",
+        "fragilidad": "MEDIA",
+    }
+    shipment = _crear_preregistro_desde_chat(db_session, datos, "sess-test")
+    assert shipment is not None
+    assert shipment.shipment_code
