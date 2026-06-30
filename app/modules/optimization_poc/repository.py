@@ -4,7 +4,7 @@ from random import Random
 
 from sqlalchemy.orm import Session
 
-from app.core.business_time import business_today, ensure_business_tz
+from app.core.business_time import business_day_utc_bounds, business_today, ensure_business_tz
 from app.modules.optimization_poc.models.package import normalize_destination
 # from app.modules.optimization_poc.models.package import Package3D, is_upright_appliance
 from app.modules.optimization_poc.schema import Package, Truck

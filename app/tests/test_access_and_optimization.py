@@ -142,3 +142,39 @@ def test_best_fit_decreasing_uses_registered_shipments_and_skips_envelopes(
     assert metrics["unplaced_count"] == 0
     assert len(data["ordered_packages"]) == 4
     assert envelope_code not in {placement["codigo"] for placement in data["placements"]}
+
+
+def test_run_with_package_codes_filters_selected_shipments(
+    api_client,
+    estiba_headers,
+    valid_shipment_payload,
+):
+    """Regresión: el camino con package_codes (list_registered_packages_by_codes)
+    fallaba con NameError por un import faltante de business_day_utc_bounds."""
+    codes = []
+    for index, destination in enumerate(("Shorey", "Angasmarca"), start=1):
+        payload = {
+            **valid_shipment_payload,
+            "descripcion": f"Paquete por codigo {index}",
+            "destino": destination,
+            "tipo_contenido": "ROPA",
+            "largo_cm": 30 + index,
+            "ancho_cm": 20 + index,
+            "alto_cm": 15 + index,
+            "orientacion_base": "LARGO_ANCHO",
+        }
+        created = api_client.post("/api/v1/encomiendas", json=payload)
+        assert created.status_code == 201, created.text
+        codes.append(created.json()["codigo_encomienda"])
+
+    response = api_client.post(
+        "/api/v1/optimization/poc/best-fit-decreasing/run",
+        headers=estiba_headers,
+        json={"truck_id": "CAMION_A", "package_codes": codes, "allow_rotation": True},
+    )
+
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["input_count"] == len(codes)
+    placed_codes = {placement["codigo"] for placement in data["placements"]}
+    assert placed_codes.issubset(set(codes))
