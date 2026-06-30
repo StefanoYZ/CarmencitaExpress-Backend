@@ -87,7 +87,7 @@ def download_mock_pdf_endpoint(serie: str, numero: str, db: Session = Depends(ge
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mock receipt not found")
 
     pdf_bytes = generate_mock_receipt_pdf(record)
-    shipment = get_shipment_by_code(db, record.codigo_encomienda)
+    shipment = get_shipment_by_code(db, record.shipment_code)
     if shipment is not None:
         finish_open_boleta_log_by_shipment(db, encomienda_id=shipment.id)
     filename = f"boleta_mock_{serie}_{numero}.pdf"

@@ -10,6 +10,19 @@ def business_now() -> datetime:
     return datetime.now(BUSINESS_TIMEZONE)
 
 
+def ensure_business_tz(value: datetime | None) -> datetime | None:
+    """Normaliza un datetime a la zona de negocio (aware).
+
+    Evita comparar datetimes naive (p. ej. los que devuelve SQLite) con aware
+    (los de business_now). Si es naive se asume la zona de negocio.
+    """
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=BUSINESS_TIMEZONE)
+    return value.astimezone(BUSINESS_TIMEZONE)
+
+
 def business_today() -> date:
     return business_now().date()
 

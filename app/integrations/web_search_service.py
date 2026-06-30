@@ -27,17 +27,20 @@ def buscar_web(query: str, *, num: int = 5) -> list[dict] | None:
     """Ejecuta una búsqueda web y devuelve resultados [{titulo, snippet, link}].
 
     Devuelve None si no hay key configurada o si la búsqueda falla (degradado).
+
+    OCP: para agregar un proveedor nuevo (bing, serpapi, etc.) basta con
+    registrarlo en SEARCH_PROVIDERS; esta función no cambia.
     """
     if not settings.search_api_key or not query.strip():
         return None
 
     provider = (settings.search_provider or "serper").strip().lower()
-    try:
-        if provider == "serper":
-            return _buscar_serper(query, num=num)
-        # Otros providers pueden agregarse aquí (bing, serpapi, etc.).
+    buscar = SEARCH_PROVIDERS.get(provider)
+    if buscar is None:
         logger.warning("Proveedor de búsqueda no soportado: %s", provider)
         return None
+    try:
+        return buscar(query, num=num)
     except Exception as exc:
         logger.warning("Búsqueda web falló (%s): %s", type(exc).__name__, exc)
         return None
@@ -73,3 +76,9 @@ def _buscar_serper(query: str, *, num: int) -> list[dict]:
         })
 
     return resultados
+
+
+# Registro de proveedores (OCP): clave del provider → función de búsqueda.
+SEARCH_PROVIDERS = {
+    "serper": _buscar_serper,
+}
