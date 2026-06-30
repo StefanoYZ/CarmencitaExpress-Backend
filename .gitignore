@@ -35,3 +35,8 @@ external/lycet-master/
 .DS_Store
 Thumbs.db
 
+
+# Respaldos de BD (datos reales, no subir)
+backups/
+
+docs/

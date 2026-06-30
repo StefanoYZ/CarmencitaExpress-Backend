@@ -11,6 +11,29 @@ from app.modules.shipments.constants import (
 
 EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 BASE_ORIENTATION_VALUES = {"LARGO_ANCHO", "LARGO_ALTO", "ANCHO_ALTO"}
+BASE_VERTICAL_DIMENSION = {
+    "LARGO_ANCHO": "height",
+    "LARGO_ALTO": "width",
+    "ANCHO_ALTO": "length",
+}
+VERTICAL_ONLY_CONTENT_KEYWORDS = (
+    "refrigeradora",
+    "refrigerador",
+    "refri",
+    "congeladora",
+    "congelador",
+    "cocina",
+    "microondas",
+    "licuadora",
+    "lavadora",
+    "secadora",
+    "air fryer",
+    "freidora",
+    "olla arrocera",
+    "extractora",
+    "electrodomestico",
+    "electrodomesticos",
+)
 
 
 class ShipmentPayloadBase(BaseModel):
@@ -181,6 +204,18 @@ class ShipmentPayloadBase(BaseModel):
             raise ValueError("package dimensions must be greater than 0")
         if self.content_type != "DOCUMENTOS" and not self.base_orientation:
             raise ValueError("orientacion_base is required for packages")
+        if self.content_type != "DOCUMENTOS" and not _base_orientation_is_safe(
+            content_type=self.content_type,
+            description=self.description,
+            fragility=self.fragility,
+            base_orientation=self.base_orientation,
+            length_cm=self.length_cm,
+            width_cm=self.width_cm,
+            height_cm=self.height_cm,
+        ):
+            raise ValueError(
+                "orientacion_base is not safe for this package; select the base that keeps it upright"
+            )
         if self.content_type == "DOCUMENTOS":
             self.base_orientation = None
         return self
@@ -256,6 +291,26 @@ class ShipmentPreRegistrationResponse(BaseModel):
     status: str = Field(alias="estado")
     registration_origin: str = Field(alias="origen_registro")
     message: str = Field(alias="mensaje")
+
+
+class ConfirmPreRegistrationRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    base_orientation: str | None = Field(default=None, alias="orientacion_base")
+
+    @field_validator("base_orientation")
+    @classmethod
+    def normalize_base_orientation(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip().upper()
+        if not normalized:
+            return None
+        if normalized not in BASE_ORIENTATION_VALUES:
+            raise ValueError(
+                "orientacion_base must be LARGO_ANCHO, LARGO_ALTO or ANCHO_ALTO"
+            )
+        return normalized
 
 
 class ShipmentCancelRequest(BaseModel):
@@ -361,3 +416,36 @@ def _validate_document_number(document_type: str | None, document_number: str | 
 
 def _normalize_spaces(value: str | None) -> str:
     return " ".join(str(value or "").strip().split())
+
+
+def _base_orientation_is_safe(
+    *,
+    content_type: str | None,
+    description: str | None,
+    fragility: str | None,
+    base_orientation: str | None,
+    length_cm: float,
+    width_cm: float,
+    height_cm: float,
+) -> bool:
+    if not base_orientation:
+        return False
+
+    description_norm = _normalize_spaces(description).casefold()
+    requires_upright = (
+        (content_type or "").upper() == "ELECTRODOMESTICOS"
+        or (fragility or "").upper() == "ALTA"
+        or any(keyword in description_norm for keyword in VERTICAL_ONLY_CONTENT_KEYWORDS)
+    )
+    if not requires_upright:
+        return True
+
+    dimensions = {
+        "length": float(length_cm),
+        "width": float(width_cm),
+        "height": float(height_cm),
+    }
+    vertical_key = BASE_VERTICAL_DIMENSION.get(base_orientation)
+    vertical_value = dimensions.get(vertical_key or "", 0)
+    largest_value = max(dimensions.values())
+    return vertical_value >= largest_value / 1.3
