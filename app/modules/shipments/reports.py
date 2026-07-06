@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date
 from html import escape
 from io import BytesIO
 
@@ -11,6 +11,7 @@ from reportlab.lib.units import mm
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 from sqlalchemy.orm import Session
 
+from app.core.business_time import business_now
 from app.modules.quotes.service import calculate_quote_for_shipment
 from app.modules.shipments.model import Shipment
 from app.modules.shipments.repository import list_shipments
@@ -88,7 +89,7 @@ def generate_operational_report_pdf(db: Session, **filters) -> bytes:
     story = [
         Paragraph("CARMENCITA EXPRESS CARGO", styles["Title"]),
         Paragraph("Reporte operativo de encomiendas", styles["Heading2"]),
-        Paragraph(f"Generado: {datetime.now().strftime('%d/%m/%Y %H:%M')}", styles["Normal"]),
+        Paragraph(f"Generado: {business_now().strftime('%d/%m/%Y %H:%M')}", styles["Normal"]),
         Spacer(1, 5 * mm),
     ]
     table_data = [REPORT_HEADERS] + (rows or [["Sin registros"] + [""] * (len(REPORT_HEADERS) - 1)])

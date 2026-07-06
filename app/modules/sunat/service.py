@@ -1,8 +1,9 @@
-from datetime import date, datetime
+from datetime import date
 from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.core.business_time import business_now
 from app.core.config import settings
 from app.modules.measurement_logs.service import link_boleta_log_to_receipt
 from app.modules.quotes.schema import QuoteResponse
@@ -61,7 +62,7 @@ def build_receipt_payload(
         "tipoDoc": "03",
         "serie": MOCK_RECEIPT_SERIES,
         "correlativo": correlativo,
-        "fechaEmision": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "fechaEmision": business_now().isoformat(timespec="seconds"),
         "tipoMoneda": "PEN",
         "formaPago": {
             "moneda": "PEN",

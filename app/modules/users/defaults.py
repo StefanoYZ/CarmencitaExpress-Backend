@@ -168,6 +168,13 @@ BASE_PERMISSIONS = [
         "action": "write",
     },
     {
+        "code": "developer.read",
+        "name": "Vista developer",
+        "description": "Inspeccionar tablas del sistema en modo solo lectura y exportarlas.",
+        "module": "developer",
+        "action": "read",
+    },
+    {
         "code": "optimization.read",
         "name": "Consultar optimizacion de carga",
         "description": "Consultar paquetes, camiones y escenarios de optimizacion.",
@@ -208,10 +215,14 @@ BASE_ROLE_PERMISSIONS = {
         "optimization.read",
         "optimization.run",
     ],
+    "DEVELOPER": [
+        "developer.read",
+    ],
 }
 
 BASE_ROLE_DESCRIPTIONS = {
     "ADMINISTRADOR": "Acceso completo al sistema interno.",
     "SECRETARIA": "Gestiona registros, cotizaciones, boletas, etiquetas y tracking.",
     "ESTIBA": "Acceso exclusivo a la optimizacion y simulacion de carga.",
+    "DEVELOPER": "Inspeccion tecnica de las tablas del sistema (solo lectura y exportacion).",
 }
