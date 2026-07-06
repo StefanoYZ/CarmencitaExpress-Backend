@@ -1,12 +1,13 @@
-import os
 import mercadopago
-from dotenv import load_dotenv
 
-load_dotenv()
+from app.core.config import MERCADOPAGO_ACCESS_TOKEN
 
-MERCADOPAGO_ACCESS_TOKEN = os.getenv("MERCADOPAGO_ACCESS_TOKEN")
 
-sdk = mercadopago.SDK(MERCADOPAGO_ACCESS_TOKEN)
+def _get_sdk():
+    if not MERCADOPAGO_ACCESS_TOKEN:
+        raise ValueError("MERCADOPAGO_ACCESS_TOKEN no esta configurado.")
+    return mercadopago.SDK(MERCADOPAGO_ACCESS_TOKEN)
+
 
 def procesar_pago_yape(data: dict):
     token = data.get("token")
@@ -27,7 +28,7 @@ def procesar_pago_yape(data: dict):
         }
     }
 
-    payment_response = sdk.payment().create(payment_data)
+    payment_response = _get_sdk().payment().create(payment_data)
     payment = payment_response.get("response", {})
 
     return {
