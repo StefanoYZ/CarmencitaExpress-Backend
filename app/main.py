@@ -7,6 +7,7 @@ from app.modules.auth.router import router as auth_router
 from app.modules.clients.router import router as clients_router
 from app.modules.charge_logs.router import router as charge_logs_router
 from app.modules.destinations.router import router as destinations_router
+from app.modules.developer_view.router import router as developer_view_router
 from app.modules.optimization_poc.router import router as optimization_poc_router
 from app.modules.payments.router import router as payments_router
 from app.modules.quotes.router import router as quotes_router
@@ -59,6 +60,7 @@ app.include_router(optimization_poc_router, prefix=settings.api_prefix)
 app.include_router(measurement_boletas_router, prefix=settings.api_prefix)
 app.include_router(measurement_servicio_router, prefix=settings.api_prefix)
 app.include_router(measurement_carga_router, prefix=settings.api_prefix)
+app.include_router(developer_view_router, prefix=settings.api_prefix)
 app.include_router(asistente_router, prefix=settings.api_prefix)
 app.include_router(logs_asistente_router, prefix=settings.api_prefix)
 app.include_router(base_conocimiento_router, prefix=settings.api_prefix)
