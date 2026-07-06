@@ -32,7 +32,11 @@ app = FastAPI(title=settings.app_name)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,
-    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$|^https://[a-z0-9-]+\.netlify\.app$",
+    # En produccion (Droplet), nginx expone frontend y backend bajo el mismo
+    # origen via reverse proxy (ver deploy/docker-compose.yml + nginx.conf), asi
+    # que el navegador no hace peticiones cross-origin. Este regex solo cubre
+    # desarrollo local (Vite en localhost) y accesos directos al backend sin proxy.
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

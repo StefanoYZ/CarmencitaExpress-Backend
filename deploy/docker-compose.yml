@@ -1,0 +1,161 @@
+name: carmencita
+
+# Layout esperado en el Droplet (ver deploy/README.md):
+#   /opt/carmencita/
+#   ├── deploy/                        <- este archivo + .env (este repo)
+#   ├── CarmencitaExpress-Backend/     <- clon del repo backend
+#   ├── Front-Carmencita/              <- clon del repo frontend (contiene frontend/)
+#   └── Lycet-Carmencita/              <- clon del repo Lycet
+#
+# Unico servicio expuesto al exterior: "frontend" (nginx), que sirve el SPA y
+# hace reverse proxy interno a "backend". postgres_db, backend y lycet_service
+# NO publican puertos: solo son alcanzables dentro de la red de Docker.
+
+services:
+  postgres_db:
+    image: postgres:16-alpine
+    container_name: carmencita-postgres
+    restart: unless-stopped
+    environment:
+      TZ: America/Lima
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 300M
+          cpus: "0.75"
+    # Sin "ports": inaccesible desde fuera del Droplet. Para depurar con psql,
+    # usa un tunel SSH: ssh -L 5433:localhost:5432 usuario@droplet y luego
+    # "docker exec -it carmencita-postgres psql -U $POSTGRES_USER".
+
+  lycet_service:
+    # Imagen pre-compilada: se construye y publica en ghcr.io desde el CI de
+    # Lycet-Carmencita (build+push en el runner de GitHub, no en el Droplet).
+    # El Droplet solo hace "docker compose pull", nunca compila PHP/composer
+    # localmente. LYCET_IMAGE_TAG permite fijar un SHA especifico para rollback
+    # (por defecto "latest").
+    image: ghcr.io/stefanoyz/lycet-carmencita:${LYCET_IMAGE_TAG:-latest}
+    pull_policy: always
+    container_name: carmencita-lycet
+    restart: unless-stopped
+    environment:
+      APP_ENV: prod
+      APP_SECRET: ${LYCET_APP_SECRET}
+      CLIENT_TOKEN: ${LYCET_CLIENT_TOKEN}
+      CERTIFICATE_BASE64: ${LYCET_CERTIFICATE_BASE64}
+      LOGO_BASE64: ${LYCET_LOGO_BASE64}
+      SOL_USER: ${LYCET_SOL_USER}
+      SOL_PASS: ${LYCET_SOL_PASS}
+      FE_URL: ${LYCET_FE_URL}
+      RE_URL: ${LYCET_RE_URL}
+      GUIA_URL: ${LYCET_GUIA_URL}
+      AUTH_URL: ${LYCET_AUTH_URL}
+      API_URL: ${LYCET_API_URL_GUIA}
+      CLIENT_ID: ${LYCET_CLIENT_ID}
+      CLIENT_SECRET: ${LYCET_CLIENT_SECRET}
+      WKHTMLTOPDF_PATH: wkhtmltopdf
+      CORS_ALLOW_ORIGIN: .
+      TRUSTED_PROXIES: "127.0.0.1,REMOTE_ADDR"
+    volumes:
+      - lycet_data:/var/www/html/data
+    expose:
+      - "8000"
+    deploy:
+      resources:
+        limits:
+          # opcache.memory_consumption=256 ya reserva 256M fijos + el pool de
+          # workers de php-pm + picos de wkhtmltopdf por cada boleta generada
+          # (motor WebKit, ~100-300M por invocacion). Es el servicio mas pesado
+          # del stack: si se dispara, que muera el y se reinicie (restart:
+          # unless-stopped), no que se quede sin RAM el Droplet entero.
+          memory: 600M
+          cpus: "1.0"
+    # Sin "ports": solo "backend" lo alcanza como http://lycet_service:8000
+
+  backend:
+    build:
+      context: ../CarmencitaExpress-Backend
+      dockerfile: Dockerfile
+    container_name: carmencita-backend
+    restart: unless-stopped
+    depends_on:
+      postgres_db:
+        condition: service_healthy
+      lycet_service:
+        condition: service_started
+    environment:
+      TZ: America/Lima
+      APP_NAME: ${APP_NAME}
+      API_PREFIX: /api/v1
+      CORS_ORIGINS: ${CORS_ORIGINS}
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres_db:5432/${POSTGRES_DB}
+      SUNAT_ENV: ${SUNAT_ENV}
+      SUNAT_PROVIDER: lycet
+      SUNAT_ALLOW_REAL_EMISSION: ${SUNAT_ALLOW_REAL_EMISSION}
+      # Interno: el backend habla con Lycet por la red de Docker, nunca por internet.
+      LYCET_API_URL: http://lycet_service:8000
+      LYCET_CLIENT_TOKEN: ${LYCET_CLIENT_TOKEN}
+      MERCADOPAGO_PUBLIC_KEY: ${MERCADOPAGO_PUBLIC_KEY}
+      MERCADOPAGO_ACCESS_TOKEN: ${MERCADOPAGO_ACCESS_TOKEN}
+      RENIEC_API_URL: ${RENIEC_API_URL}
+      RENIEC_API_TOKEN: ${RENIEC_API_TOKEN}
+      SECRET_KEY: ${SECRET_KEY}
+      ALGORITHM: HS256
+      ACCESS_TOKEN_EXPIRE_MINUTES: "1440"
+      DEFAULT_ADMIN_USERNAME: ${DEFAULT_ADMIN_USERNAME}
+      DEFAULT_ADMIN_EMAIL: ${DEFAULT_ADMIN_EMAIL}
+      DEFAULT_ADMIN_PASSWORD: ${DEFAULT_ADMIN_PASSWORD}
+      GROQ_API_KEY: ${GROQ_API_KEY}
+      GROQ_MODEL: ${GROQ_MODEL}
+      ASSISTANT_LLM_ENABLED: ${ASSISTANT_LLM_ENABLED}
+      SEARCH_API_KEY: ${SEARCH_API_KEY}
+      SEARCH_API_URL: ${SEARCH_API_URL}
+      SEARCH_PROVIDER: serper
+    expose:
+      - "8000"
+    deploy:
+      resources:
+        limits:
+          # Cubre el uso normal de Uvicorn (1 proceso) y los picos de la
+          # optimizacion 3D (hasta 70 paquetes) sin permitir un fuga de
+          # memoria descontrolada.
+          memory: 400M
+          cpus: "1.0"
+    # Sin "ports": solo "frontend" (nginx) lo alcanza como http://backend:8000
+
+  frontend:
+    build:
+      context: ../Front-Carmencita/frontend
+      dockerfile: Dockerfile
+      args:
+        # Ruta relativa: nginx hace reverse proxy a /api/v1 en el mismo origen,
+        # asi el navegador nunca sale del dominio del Droplet (sin CORS).
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-/api/v1}
+    container_name: carmencita-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+      # Cuando actives HTTPS (certbot/Let's Encrypt), agrega "443:443" y monta
+      # los certificados en /etc/nginx/certs (ver deploy/README.md).
+    deploy:
+      resources:
+        limits:
+          # Nginx sirviendo estaticos + reverse proxy: consumo real minimo,
+          # limite generoso solo como resguardo.
+          memory: 100M
+          cpus: "0.5"
+
+volumes:
+  postgres_data:
+  lycet_data:

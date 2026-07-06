@@ -7,12 +7,14 @@ Backend FastAPI para Carmencita Smart System. Este repositorio contiene solo el 
 - Python 3.11
 - FastAPI
 - Pydantic / pydantic-settings
-- Almacenamiento temporal en memoria para flujos de desarrollo
+- SQLAlchemy 2 + PostgreSQL
+- Autenticacion JWT (roles y permisos)
 - Lycet/Greenter para integracion SUNAT beta
 - Mercado Pago / Yape para pagos
 - RENIEC como API externa
+- Docker (Dockerfile en la raiz) para contenerizar el backend
 
-PostgreSQL, autenticacion, Docker, Jenkins y Kubernetes no forman parte del alcance actual.
+Kubernetes, Jenkins y AWS no forman parte del alcance del proyecto.
 
 ## Estructura De Modulos
 
