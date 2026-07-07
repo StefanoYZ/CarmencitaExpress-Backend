@@ -44,7 +44,37 @@ jobs:
           envs: ENV_FILE
           script: |
             set -euo pipefail
-            echo "$ENV_FILE" > /opt/carmencita/deploy/.env
+
+            # Fusiona ENV_FILE con el .env existente en vez de sobreescribirlo
+            # entero: cualquier clave que NO venga en el secret (p. ej.
+            # LYCET_LOGO_BASE64, omitida por el limite de tamano de GitHub
+            # Secrets) se conserva tal cual esta en el Droplet.
+            python3 - /opt/carmencita/deploy/.env <<'PYEOF'
+            import os, sys
+            path = sys.argv[1]
+            new_content = os.environ["ENV_FILE"]
+            current, order = {}, []
+            if os.path.exists(path):
+                with open(path) as f:
+                    for line in f:
+                        stripped = line.rstrip("\n")
+                        if not stripped or stripped.startswith("#") or "=" not in stripped:
+                            continue
+                        key, _, value = stripped.partition("=")
+                        current[key] = value
+                        order.append(key)
+            for line in new_content.splitlines():
+                stripped = line.strip()
+                if not stripped or stripped.startswith("#") or "=" not in stripped:
+                    continue
+                key, _, value = stripped.partition("=")
+                if key not in current:
+                    order.append(key)
+                current[key] = value
+            with open(path, "w") as f:
+                for key in order:
+                    f.write(f"{key}={current[key]}\n")
+            PYEOF
 
             # Clon dedicado a CI: siempre se alinea con origin/main, sin merges.
             cd /opt/carmencita/CarmencitaExpress-Backend
