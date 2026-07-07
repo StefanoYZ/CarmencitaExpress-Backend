@@ -175,6 +175,13 @@ BASE_PERMISSIONS = [
         "action": "read",
     },
     {
+        "code": "developer.write",
+        "name": "Editar tablas (vista developer)",
+        "description": "Crear, actualizar y eliminar filas desde la vista developer.",
+        "module": "developer",
+        "action": "write",
+    },
+    {
         "code": "optimization.read",
         "name": "Consultar optimizacion de carga",
         "description": "Consultar paquetes, camiones y escenarios de optimizacion.",
@@ -217,6 +224,7 @@ BASE_ROLE_PERMISSIONS = {
     ],
     "DEVELOPER": [
         "developer.read",
+        "developer.write",
     ],
 }
 
