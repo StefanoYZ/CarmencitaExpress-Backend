@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -13,7 +13,10 @@ from app.modules.optimization_poc.schema import (
 )
 from app.modules.optimization_poc.service import (
     get_scenario,
+    run_backtracking_logistic,
+    run_best_fit,
     run_best_fit_decreasing,
+    run_first_fit,
     run_minimax_maximin,
     run_worst_fit,
 )
@@ -53,9 +56,10 @@ def get_poc_scenario(
 @router.post("/first-fit/run", response_model=SimulationResponse)
 def run_first_fit_endpoint(
     payload: RunRequest,
+    db: Session = Depends(get_db),
     _current_user=Depends(require_permission("optimization.run")),
 ) -> SimulationResponse:
-    return _disabled_algorithm()
+    return run_first_fit(payload, db=db)
 
 
 @router.post("/minimax-maximin/run", response_model=SimulationResponse)
@@ -70,9 +74,10 @@ def run_minimax_maximin_endpoint(
 @router.post("/best-fit/run", response_model=SimulationResponse)
 def run_best_fit_endpoint(
     payload: RunRequest,
+    db: Session = Depends(get_db),
     _current_user=Depends(require_permission("optimization.run")),
 ) -> SimulationResponse:
-    return _disabled_algorithm()
+    return run_best_fit(payload, db=db)
 
 
 @router.post("/worst-fit/run", response_model=SimulationResponse)
@@ -96,13 +101,7 @@ def run_best_fit_decreasing_endpoint(
 @router.post("/backtracking/run", response_model=SimulationResponse)
 def run_backtracking_endpoint(
     payload: RunRequest,
+    db: Session = Depends(get_db),
     _current_user=Depends(require_permission("optimization.run")),
 ) -> SimulationResponse:
-    return _disabled_algorithm()
-
-
-def _disabled_algorithm():
-    raise HTTPException(
-        status_code=status.HTTP_410_GONE,
-        detail="Algoritmo desactivado. Modelos activos: Minimax, Worst Fit y Best Fit Decreasing 3D.",
-    )
+    return run_backtracking_logistic(payload, db=db)

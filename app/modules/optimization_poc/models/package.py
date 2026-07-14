@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from unicodedata import normalize
 
 from app.modules.optimization_poc.schema import Package, Placement
-from app.modules.optimization_poc.utils.constants import BEST_FIT_3D, DESTINATION_ALIASES, FRAGILITY_ORDER, MAXIMIN, MINIMAX, ROUTE_RANK, STACK_PRIORITY
+from app.modules.optimization_poc.utils.constants import BEST_FIT_3D, DESTINATION_ALIASES, FLAT_ELECTRONIC_RATIO, FRAGILITY_ORDER, MAXIMIN, MINIMAX, ROUTE_RANK, STACK_PRIORITY
 
 UPRIGHT_APPLIANCE_KEYWORDS = {
     "AIR FRYER",
@@ -101,6 +101,17 @@ def is_upright_appliance(package: Package3D | Package) -> bool:
     description = _normalize_text(getattr(package, "descripcion", ""))
     searchable_text = f"{content_type} {description}"
     return any(keyword in searchable_text for keyword in UPRIGHT_APPLIANCE_KEYWORDS)
+
+
+def is_flat_electronic(package: Package3D | Package) -> bool:
+    """Restriccion de estabilidad: un ELECTRONICOS es "plano" cuando su dimension
+    mayor supera FLAT_ELECTRONIC_RATIO veces la menor. Esos paquetes deben viajar
+    parados sobre su canto delgado, no acostados sobre su cara mas amplia."""
+    content_type = _normalize_text(getattr(package, "tipo_contenido", None) or "")
+    if content_type != "ELECTRONICOS":
+        return False
+    dims = sorted([package.largo_cm, package.ancho_cm, package.alto_cm])
+    return dims[0] > 0 and dims[2] >= FLAT_ELECTRONIC_RATIO * dims[0]
 
 
 def _normalize_text(value: str | None) -> str:
