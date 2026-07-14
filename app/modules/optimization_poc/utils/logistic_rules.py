@@ -1,7 +1,13 @@
 from unicodedata import normalize as unicode_normalize
 
 from app.modules.optimization_poc.models import Package3D, Truck3D
-from app.modules.optimization_poc.utils.constants import DESTINATION_ALIASES, LOGISTIC_ROUTE
+from app.modules.optimization_poc.utils.constants import (
+    DESTINATION_ALIASES,
+    LEVER_CENTRAL_BAND_RATIO,
+    LEVER_LONG_SUPPORT_RATIO,
+    LOGISTIC_ROUTE,
+    LONGITUDINAL_MIN_CONTACT_RATIO,
+)
 
 DEFAULT_ROUTE = "TRUJILLO_OROCULLAY"
 MIN_SUPPORT_RATIO = 0.60
@@ -222,6 +228,81 @@ def validate_stacking_constraint(
         if current_supported_weight + carried_weight > stacking_capacity + 1e-6:
             return False
 
+    return True
+
+
+def validate_longitudinal_restraint(
+    candidate_space: dict,
+    candidate_width: float,
+    candidate_height: float,
+    candidate_length: float,
+    placed_packages: list[dict],
+    truck: Truck3D,
+) -> bool:
+    """Un paquete ELEVADO debe estar sujeto en el eje de marcha (z) contra una pared
+    del box o contra otro paquete; si no, al frenar el camion se caeria."""
+    if candidate_space["y"] <= 0.001:
+        return True
+
+    x = candidate_space["x"]
+    y = candidate_space["y"]
+    z = candidate_space["z"]
+    if z <= 0.001 or abs(z + candidate_length - truck.largo_cm) <= 0.001:
+        return True
+
+    face_area = candidate_width * candidate_height
+    if face_area <= 0:
+        return True
+
+    for package in placed_packages:
+        overlap_x = min(x + candidate_width, package["x"] + package["width"]) - max(x, package["x"])
+        overlap_y = min(y + candidate_height, package["y"] + package["height"]) - max(y, package["y"])
+        if overlap_x <= 0.001 or overlap_y <= 0.001:
+            continue
+        if (overlap_x * overlap_y) / face_area < LONGITUDINAL_MIN_CONTACT_RATIO:
+            continue
+        if abs(package["z"] + package["length"] - z) <= 0.001 or abs(z + candidate_length - package["z"]) <= 0.001:
+            return True
+    return False
+
+
+def validate_no_lever_constraint(
+    candidate_space: dict,
+    candidate_width: float,
+    candidate_length: float,
+    placed_packages: list[dict],
+) -> bool:
+    """Evita el efecto palanca: sobre un soporte ALARGADO, el paquete apilado debe
+    caer en la banda central del soporte, no en un extremo."""
+    if candidate_space["y"] <= 0.001:
+        return True
+
+    center_x = candidate_space["x"] + candidate_width / 2
+    center_z = candidate_space["z"] + candidate_length / 2
+
+    for package in placed_packages:
+        if abs(package["y"] + package["height"] - candidate_space["y"]) > 0.001:
+            continue
+        overlap_x = min(candidate_space["x"] + candidate_width, package["x"] + package["width"]) - max(candidate_space["x"], package["x"])
+        overlap_z = min(candidate_space["z"] + candidate_length, package["z"] + package["length"]) - max(candidate_space["z"], package["z"])
+        if overlap_x <= 0.001 or overlap_z <= 0.001:
+            continue
+
+        long_axis = max(package["width"], package["length"])
+        short_axis = min(package["width"], package["length"])
+        if short_axis <= 0 or long_axis < LEVER_LONG_SUPPORT_RATIO * short_axis:
+            continue
+
+        if package["width"] >= package["length"]:
+            support_center = package["x"] + package["width"] / 2
+            half_band = (package["width"] / 2) * LEVER_CENTRAL_BAND_RATIO
+            if abs(center_x - support_center) > half_band:
+                return False
+        else:
+            support_center = package["z"] + package["length"] / 2
+            half_band = (package["length"] / 2) * LEVER_CENTRAL_BAND_RATIO
+            if abs(center_z - support_center) > half_band:
+                return False
     return True
 
 

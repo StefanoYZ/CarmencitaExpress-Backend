@@ -102,12 +102,13 @@ def valid_shipment_payload() -> dict:
         "origen": "Trujillo",
         "destino": "Angasmarca",
         "descripcion": "Paquete de prueba QA",
-        "tipo_contenido": "DOCUMENTOS",
+        "tipo_contenido": "ROPA",
         "peso_kg": 10.5,
         "largo_cm": 40,
         "ancho_cm": 30,
         "alto_cm": 20,
         "fragilidad": "MEDIA",
+        "orientacion_base": "LARGO_ANCHO",
     }
 
 

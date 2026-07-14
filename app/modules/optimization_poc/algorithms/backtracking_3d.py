@@ -32,12 +32,84 @@ from app.modules.optimization_poc.utils.logistic_rules import (
     normalize_text,
     register_supported_weight,
     space_overlaps_destination_zone,
+    validate_longitudinal_restraint,
+    validate_no_lever_constraint,
     validate_origin_and_destinations,
     validate_stability_constraint,
     validate_stacking_constraint,
 )
 from app.modules.optimization_poc.utils.progressive_loading import select_progressive_placement
 from app.modules.optimization_poc.validators import is_weight_allowed, recompute_supported_weights
+
+BACKTRACKING_MAX_SECONDS = 3.0
+BACKTRACKING_MAX_NODES = 25_000
+BACKTRACKING_MAX_BRANCHES_PER_LEVEL = 8
+
+
+def rounded(value: float) -> float:
+    return round(float(value), 3)
+
+
+def space_key(space: dict) -> tuple[float, float, float, float, float, float]:
+    return (
+        rounded(space["x"]),
+        rounded(space["y"]),
+        rounded(space["z"]),
+        rounded(space["width"]),
+        rounded(space["height"]),
+        rounded(space["length"]),
+    )
+
+
+def option_key(option: dict) -> tuple[float, ...]:
+    return (
+        *space_key(option["space"]),
+        rounded(option["width"]),
+        rounded(option["height"]),
+        rounded(option["length"]),
+    )
+
+
+def dedupe_candidate_options(candidate_options: list[dict]) -> list[dict]:
+    unique_options: list[dict] = []
+    seen: set[tuple[float, ...]] = set()
+
+    for option in candidate_options:
+        key = option_key(option)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique_options.append(option)
+
+    return unique_options
+
+
+def build_state_key(
+    index: int,
+    free_spaces: list[dict],
+    placed_packages: list[dict],
+    total_weight: float,
+) -> tuple:
+    placed_key = tuple(
+        sorted(
+            (
+                package["id"],
+                rounded(package["x"]),
+                rounded(package["y"]),
+                rounded(package["z"]),
+                rounded(package["width"]),
+                rounded(package["height"]),
+                rounded(package["length"]),
+            )
+            for package in placed_packages
+        )
+    )
+    return (
+        index,
+        rounded(total_weight),
+        tuple(sorted(space_key(space) for space in free_spaces)),
+        placed_key,
+    )
 
 
 def build_progressive_seed(
@@ -260,6 +332,23 @@ def backtracking_3d_algorithm(
         ordered_packages,
         destination_priority,
     )
+    search_stats = {
+        "visited_nodes": 0,
+        "pruned_by_bound": 0,
+        "pruned_by_seen_state": 0,
+        "candidate_options_trimmed": 0,
+        "interrupted": False,
+    }
+    seen_states: dict[tuple, tuple[int, float]] = {}
+
+    def should_stop_search() -> bool:
+        if (perf_counter() - started) >= BACKTRACKING_MAX_SECONDS:
+            search_stats["interrupted"] = True
+            return True
+        if search_stats["visited_nodes"] >= BACKTRACKING_MAX_NODES:
+            search_stats["interrupted"] = True
+            return True
+        return False
 
     def is_better_solution(
         current_solution: dict,
@@ -293,9 +382,28 @@ def backtracking_3d_algorithm(
     ) -> None:
         nonlocal best_solution
 
+        if should_stop_search():
+            return
+
+        search_stats["visited_nodes"] += 1
+
         maximum_possible_count = len(placed_packages) + (len(ordered_packages) - index)
         if maximum_possible_count < len(best_solution["placed_packages"]):
+            search_stats["pruned_by_bound"] += 1
             return
+
+        state_key = build_state_key(
+            index,
+            free_spaces,
+            placed_packages,
+            total_weight,
+        )
+        state_quality = (len(placed_packages), rounded(used_volume))
+        previous_quality = seen_states.get(state_key)
+        if previous_quality is not None and previous_quality >= state_quality:
+            search_stats["pruned_by_seen_state"] += 1
+            return
+        seen_states[state_key] = state_quality
 
         if index >= len(ordered_packages):
             current_solution = {
@@ -392,6 +500,32 @@ def backtracking_3d_algorithm(
                     ] += 1
                     continue
 
+                # R1 (sujecion longitudinal) y R3 (anti-palanca). La R2 (electronico
+                # plano parado) se aplica antes en generate_rotations.
+                if not validate_longitudinal_restraint(
+                    candidate_space=space,
+                    candidate_width=rotated_width,
+                    candidate_height=rotated_height,
+                    candidate_length=rotated_length,
+                    placed_packages=placed_packages,
+                    truck=truck,
+                ):
+                    rejection_summary[
+                        "stability_rejections"
+                    ] += 1
+                    continue
+
+                if not validate_no_lever_constraint(
+                    candidate_space=space,
+                    candidate_width=rotated_width,
+                    candidate_length=rotated_length,
+                    placed_packages=placed_packages,
+                ):
+                    rejection_summary[
+                        "stability_rejections"
+                    ] += 1
+                    continue
+
                 inside_destination_zone = (
                     space_overlaps_destination_zone(
                         space,
@@ -453,6 +587,10 @@ def backtracking_3d_algorithm(
             placed_packages,
         )
 
+        candidate_options = dedupe_candidate_options(
+            candidate_options
+        )
+
         candidate_options.sort(
             key=lambda option: (
                 not option["inside_destination_zone"],
@@ -463,6 +601,14 @@ def backtracking_3d_algorithm(
                 option["optimization_score"],
             )
         )
+
+        if len(candidate_options) > BACKTRACKING_MAX_BRANCHES_PER_LEVEL:
+            search_stats["candidate_options_trimmed"] += (
+                len(candidate_options) - BACKTRACKING_MAX_BRANCHES_PER_LEVEL
+            )
+            candidate_options = candidate_options[
+                :BACKTRACKING_MAX_BRANCHES_PER_LEVEL
+            ]
 
         if not candidate_options:
             rejection_data = (
@@ -494,6 +640,9 @@ def backtracking_3d_algorithm(
             return
 
         for option in candidate_options:
+            if should_stop_search():
+                break
+
             selected_space = option["space"]
             selected_space_index = option["space_index"]
 
@@ -617,24 +766,25 @@ def backtracking_3d_algorithm(
         # no se coloca. Esto permite encontrar soluciones donde
         # rechazar un paquete deja espacio para más paquetes
         # posteriores.
-        backtrack(
-            index=index + 1,
-            free_spaces=free_spaces,
-            placed_packages=placed_packages,
-            unplaced_packages=unplaced_packages
-            + [
-                {
-                    "id": package.id,
-                    "reason_code": "SKIPPED_BY_SEARCH",
-                    "reason": (
-                        "Paquete omitido durante la busqueda "
-                        "para evaluar una solucion alternativa"
-                    ),
-                }
-            ],
-            used_volume=used_volume,
-            total_weight=total_weight,
-        )
+        if not should_stop_search():
+            backtrack(
+                index=index + 1,
+                free_spaces=free_spaces,
+                placed_packages=placed_packages,
+                unplaced_packages=unplaced_packages
+                + [
+                    {
+                        "id": package.id,
+                        "reason_code": "SKIPPED_BY_SEARCH",
+                        "reason": (
+                            "Paquete omitido durante la busqueda "
+                            "para evaluar una solucion alternativa"
+                        ),
+                    }
+                ],
+                used_volume=used_volume,
+                total_weight=total_weight,
+            )
 
     if len(best_solution["placed_packages"]) < len(ordered_packages):
         backtrack(
@@ -768,4 +918,11 @@ def backtracking_3d_algorithm(
         "ordered_packages": (
             ordered_packages
         ),
+        "search_stats": {
+            **search_stats,
+            "max_seconds": BACKTRACKING_MAX_SECONDS,
+            "max_nodes": BACKTRACKING_MAX_NODES,
+            "max_branches_per_level": BACKTRACKING_MAX_BRANCHES_PER_LEVEL,
+            "seen_states": len(seen_states),
+        },
     }
