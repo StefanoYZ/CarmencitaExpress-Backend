@@ -94,7 +94,7 @@ def export_operational_report_pdf_endpoint(
     )
 
 
-@router.get("/reportes/operativo.xls")
+@router.get("/reportes/operativo.xlsx")
 def export_operational_report_excel_endpoint(
     fecha: date | None = Query(default=None),
     estado: str | None = Query(default=None),
@@ -110,8 +110,8 @@ def export_operational_report_excel_endpoint(
     )
     return Response(
         content=content,
-        media_type="application/vnd.ms-excel",
-        headers={"Content-Disposition": 'attachment; filename="reporte_encomiendas.xls"'},
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="reporte_encomiendas.xlsx"'},
     )
 
 

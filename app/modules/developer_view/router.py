@@ -4,6 +4,8 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.dependencies import require_permission
 from app.modules.developer_view.schema import (
+    OptimizationTestModeStatus,
+    OptimizationTestModeUpdate,
     RowCreateRequest,
     RowDeleteRequest,
     RowResponse,
@@ -22,6 +24,12 @@ from app.modules.developer_view.service import (
     get_table_schema,
     list_tables,
     update_row,
+)
+from app.modules.optimization_poc.test_data import (
+    clear_test_packages,
+    count_test_packages_today,
+    seed_test_packages,
+    test_mode_active,
 )
 
 
@@ -81,6 +89,42 @@ def export_table_excel_endpoint(nombre: str, db: Session = Depends(get_db)) -> R
         content=content,
         media_type="application/vnd.ms-excel",
         headers={"Content-Disposition": f'attachment; filename="{nombre}.xls"'},
+    )
+
+
+@router.get(
+    "/optimizacion/modo-prueba",
+    response_model=OptimizationTestModeStatus,
+)
+def get_optimization_test_mode_endpoint(
+    db: Session = Depends(get_db),
+) -> OptimizationTestModeStatus:
+    return OptimizationTestModeStatus(
+        active=test_mode_active(db),
+        count=count_test_packages_today(db),
+    )
+
+
+@router.post(
+    "/optimizacion/modo-prueba",
+    response_model=OptimizationTestModeStatus,
+    dependencies=[Depends(require_permission("developer.write"))],
+)
+def set_optimization_test_mode_endpoint(
+    payload: OptimizationTestModeUpdate,
+    db: Session = Depends(get_db),
+) -> OptimizationTestModeStatus:
+    # ON: genera paquetes de prueba (el escenario de optimizacion los usara). Con
+    # count=None el backend elige cantidad y semilla al azar -> lote distinto cada vez.
+    # OFF: los borra (el escenario vuelve a las encomiendas reales de la web).
+    if payload.active:
+        count = payload.count if payload.count and payload.count > 0 else None
+        seed_test_packages(db, n=count)
+    else:
+        clear_test_packages(db)
+    return OptimizationTestModeStatus(
+        active=test_mode_active(db),
+        count=count_test_packages_today(db),
     )
 
 

@@ -3,13 +3,16 @@ from itertools import permutations
 from app.modules.optimization_poc.models.package import (
     Package3D,
     destination_rank,
+    is_flat_electronic,
     is_upright_appliance,
 )
 from app.modules.optimization_poc.models.truck import Truck3D, target_z_from_rank
 from app.modules.optimization_poc.schema import Placement
 from app.modules.optimization_poc.validators import (
     has_lateral_support_for_vertical_thin,
+    has_longitudinal_restraint,
     has_minimum_support,
+    has_no_lever_support,
     has_overlap,
     is_inside_truck,
     respects_fragility,
@@ -59,9 +62,33 @@ def upright_appliance_orientation(package: Package3D) -> tuple[float, float, flo
     return (package.ancho_cm, package.alto_cm, package.largo_cm, "LWH")
 
 
+def flat_electronic_orientations(package: Package3D) -> list[tuple[float, float, float, str]]:
+    """Orientaciones PARADAS de un electronico plano: el canto delgado (dimension
+    menor) queda horizontal y la dimension mayor vertical, de modo que no viaje
+    acostado sobre su cara mas amplia. Se marcan VERTICAL para que la validacion de
+    apoyo lateral existente exija que se arrimen."""
+    thin, mid, big = sorted([package.ancho_cm, package.alto_cm, package.largo_cm])
+    candidates = [
+        (mid, big, thin, "VERTICAL"),
+        (thin, big, mid, "VERTICAL"),
+    ]
+    deduped: list[tuple[float, float, float, str]] = []
+    seen: set[tuple[float, float, float]] = set()
+    for width, height, depth, label in candidates:
+        key = (width, height, depth)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append((width, height, depth, label))
+    return deduped
+
+
 def orientations(package: Package3D, allow_rotation: bool) -> list[tuple[float, float, float, str]]:
     if is_upright_appliance(package):
         return [upright_appliance_orientation(package)]
+    # R2: los electronicos planos van parados sobre su canto delgado, no acostados.
+    if is_flat_electronic(package):
+        return flat_electronic_orientations(package)
     results = base_constrained_orientations(package)
     if not allow_rotation or not package.permite_rotacion:
         return results[:1]
@@ -387,6 +414,8 @@ def is_valid_placement(candidate: Placement, truck: Truck3D, placed: list[Placem
         and has_minimum_support(candidate, placed)
         and respects_fragility(candidate, placed)
         and has_lateral_support_for_vertical_thin(candidate, truck, placed)
+        and has_longitudinal_restraint(candidate, truck, placed)
+        and has_no_lever_support(candidate, placed)
     )
 
 
@@ -490,6 +519,9 @@ def generate_rotations(package: Package3D) -> list[tuple[float, float, float]]:
     if is_upright_appliance(package):
         width, height, length, _ = upright_appliance_orientation(package)
         return [(width, height, length)]
+    # R2: los electronicos planos van parados sobre su canto delgado, no acostados.
+    if is_flat_electronic(package):
+        return [(width, height, length) for width, height, length, _ in flat_electronic_orientations(package)]
     rotations = [
         (width, height, length)
         for width, height, length, _ in base_constrained_orientations(package)
