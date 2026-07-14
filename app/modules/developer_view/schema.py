@@ -47,3 +47,14 @@ class RowDeleteRequest(BaseModel):
 
 class RowResponse(BaseModel):
     row: dict
+
+
+class OptimizationTestModeStatus(BaseModel):
+    active: bool
+    count: int
+
+
+class OptimizationTestModeUpdate(BaseModel):
+    active: bool
+    # count opcional: si no se envia, el backend elige una cantidad al azar.
+    count: int | None = None

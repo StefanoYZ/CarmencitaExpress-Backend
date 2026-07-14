@@ -6,6 +6,9 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
 from app.modules.shipments.constants import (
     FRAGILITY_VALUES,
+    MAX_DIMENSION_CM,
+    MAX_ENVELOPE_WEIGHT_KG,
+    MAX_WEIGHT_KG,
     SHIPMENT_STATUS_VALUES,
 )
 
@@ -147,6 +150,8 @@ class ShipmentPayloadBase(BaseModel):
     def weight_must_be_positive(cls, value: float) -> float:
         if not math.isfinite(value) or value <= 0:
             raise ValueError("weight_kg must be greater than 0")
+        if value > MAX_WEIGHT_KG:
+            raise ValueError(f"weight_kg must not exceed {MAX_WEIGHT_KG:g} kg")
         return value
 
     @field_validator("length_cm", "width_cm", "height_cm")
@@ -154,6 +159,8 @@ class ShipmentPayloadBase(BaseModel):
     def dimensions_must_be_non_negative(cls, value: float) -> float:
         if not math.isfinite(value) or value < 0:
             raise ValueError("length_cm, width_cm and height_cm cannot be negative")
+        if value > MAX_DIMENSION_CM:
+            raise ValueError(f"dimensions must not exceed {MAX_DIMENSION_CM:g} cm")
         return value
 
     @field_validator("fragility")
@@ -217,7 +224,34 @@ class ShipmentPayloadBase(BaseModel):
                 "orientacion_base is not safe for this package; select the base that keeps it upright"
             )
         if self.content_type == "DOCUMENTOS":
+            if self.weight_kg > MAX_ENVELOPE_WEIGHT_KG:
+                raise ValueError(
+                    f"un sobre (DOCUMENTOS) no puede pesar mas de {MAX_ENVELOPE_WEIGHT_KG:g} kg"
+                )
             self.base_orientation = None
+        return self
+
+    @model_validator(mode="after")
+    def validate_distinct_contact(self):
+        # Regla de negocio: si remitente y destinatario son la MISMA persona
+        # (mismo DNI), pueden compartir teléfono y correo. Si son personas
+        # distintas (o el destinatario no se identifica con DNI), no se permite
+        # que compartan el mismo teléfono ni el mismo correo.
+        same_person = bool(
+            self.sender_document_number
+            and self.recipient_document_number
+            and self.sender_document_number.strip() == self.recipient_document_number.strip()
+        )
+        if same_person:
+            return self
+        if self.sender_phone and self.recipient_phone and self.sender_phone == self.recipient_phone:
+            raise ValueError(
+                "sender and recipient cannot share the same phone unless they are the same person (same DNI)"
+            )
+        if self.sender_email and self.recipient_email and self.sender_email == self.recipient_email:
+            raise ValueError(
+                "sender and recipient cannot share the same email unless they are the same person (same DNI)"
+            )
         return self
 
 

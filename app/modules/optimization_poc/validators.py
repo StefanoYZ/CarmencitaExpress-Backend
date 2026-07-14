@@ -1,4 +1,9 @@
 from app.modules.optimization_poc.schema import Placement, Truck
+from app.modules.optimization_poc.utils.constants import (
+    LEVER_CENTRAL_BAND_RATIO,
+    LEVER_LONG_SUPPORT_RATIO,
+    LONGITUDINAL_MIN_CONTACT_RATIO,
+)
 
 SUPPORT_RATIO = 0.60
 FRAGILITY_SUPPORT_FACTOR = {
@@ -6,6 +11,7 @@ FRAGILITY_SUPPORT_FACTOR = {
     "MEDIA": 0.5,
     "BAJA": 1.5,
 }
+_STABILITY_TOL = 0.001
 
 
 def is_inside_truck(x: float, y: float, z: float, width: float, height: float, depth: float, truck: Truck) -> bool:
@@ -124,6 +130,68 @@ def has_lateral_support_for_vertical_thin(candidate: Placement, truck: Truck, pl
         if lateral_contact_ratio >= 0.35:
             return True
     return False
+
+
+def has_longitudinal_restraint(candidate: Placement, truck: Truck, placed: list[Placement]) -> bool:
+    """Un paquete ELEVADO (apilado) necesita respaldo en el eje de marcha (z): al
+    frenar el camion, si no se arrima a una pared del box ni a otro paquete, se cae.
+    Los paquetes en el piso no requieren esta sujecion."""
+    if candidate.y <= _STABILITY_TOL:
+        return True
+    if candidate.z <= _STABILITY_TOL or abs(candidate.z + candidate.depth - truck.largo_cm) <= _STABILITY_TOL:
+        return True
+
+    face_area = candidate.width * candidate.height
+    if face_area <= 0:
+        return True
+
+    for item in placed:
+        overlap_x = min(candidate.x + candidate.width, item.x + item.width) - max(candidate.x, item.x)
+        overlap_y = min(candidate.y + candidate.height, item.y + item.height) - max(candidate.y, item.y)
+        if overlap_x <= _STABILITY_TOL or overlap_y <= _STABILITY_TOL:
+            continue
+        if (overlap_x * overlap_y) / face_area < LONGITUDINAL_MIN_CONTACT_RATIO:
+            continue
+        # Vecino que lo respalda por delante (su cara +z toca la nuestra -z) o por
+        # detras (nuestra cara +z toca su cara -z).
+        if abs(item.z + item.depth - candidate.z) <= _STABILITY_TOL or abs(candidate.z + candidate.depth - item.z) <= _STABILITY_TOL:
+            return True
+    return False
+
+
+def has_no_lever_support(candidate: Placement, placed: list[Placement]) -> bool:
+    """Evita el efecto palanca: si el paquete se apoya sobre un soporte ALARGADO,
+    su centro debe caer en la banda central del soporte, no en un extremo."""
+    if candidate.y <= _STABILITY_TOL:
+        return True
+
+    center_x = candidate.x + candidate.width / 2
+    center_z = candidate.z + candidate.depth / 2
+
+    for item in placed:
+        if abs(item.y + item.height - candidate.y) > _STABILITY_TOL:
+            continue
+        overlap_x = min(candidate.x + candidate.width, item.x + item.width) - max(candidate.x, item.x)
+        overlap_z = min(candidate.z + candidate.depth, item.z + item.depth) - max(candidate.z, item.z)
+        if overlap_x <= _STABILITY_TOL or overlap_z <= _STABILITY_TOL:
+            continue
+
+        long_axis = max(item.width, item.depth)
+        short_axis = min(item.width, item.depth)
+        if short_axis <= 0 or long_axis < LEVER_LONG_SUPPORT_RATIO * short_axis:
+            continue
+
+        if item.width >= item.depth:  # soporte largo a lo ancho (eje x).
+            support_center = item.x + item.width / 2
+            half_band = (item.width / 2) * LEVER_CENTRAL_BAND_RATIO
+            if abs(center_x - support_center) > half_band:
+                return False
+        else:  # soporte largo a lo profundo (eje z).
+            support_center = item.z + item.depth / 2
+            half_band = (item.depth / 2) * LEVER_CENTRAL_BAND_RATIO
+            if abs(center_z - support_center) > half_band:
+                return False
+    return True
 
 
 def recompute_supported_weights(placements: list[Placement]) -> None:
