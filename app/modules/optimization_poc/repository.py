@@ -4,10 +4,11 @@ from random import Random
 
 from sqlalchemy.orm import Session
 
-from app.core.business_time import business_day_utc_bounds, business_today, ensure_business_tz
+from app.core.business_time import business_today, ensure_business_tz
 from app.modules.optimization_poc.models.package import normalize_destination
 # from app.modules.optimization_poc.models.package import Package3D, is_upright_appliance
 from app.modules.optimization_poc.schema import Package, Truck
+from app.modules.optimization_poc.test_data import TEST_PACKAGE_MARKER
 from app.modules.optimization_poc.utils.constants import ROUTE_RANK
 from app.modules.shipments.constants import (
     PAYMENT_CONFIRMED_STATUS,
@@ -73,27 +74,44 @@ def list_registered_packages(db: Session, limit: int | None = None) -> list[Pack
         for shipment in shipments
         if ensure_business_tz(shipment.created_at).date() == hoy
     ]
+    # Modo prueba (switch de la Vista Developer): si existen paquetes de prueba de
+    # hoy se usan ESOS; si no, se usan las encomiendas reales registradas por la web.
+    de_prueba = [shipment for shipment in del_dia if _is_test_shipment(shipment)]
+    seleccion = de_prueba if de_prueba else [
+        shipment for shipment in del_dia if not _is_test_shipment(shipment)
+    ]
     if limit is not None:
-        del_dia = del_dia[:limit]
-    return [_shipment_to_package(shipment) for shipment in del_dia]
+        seleccion = seleccion[:limit]
+    return [_shipment_to_package(shipment) for shipment in seleccion]
+
+
+def _is_test_shipment(shipment: Shipment) -> bool:
+    return str(shipment.description or "").startswith(TEST_PACKAGE_MARKER)
 
 
 def list_registered_packages_by_codes(db: Session, codes: list[str]) -> list[Package]:
     normalized_codes = [code.strip().upper() for code in codes if code and code.strip()]
     if not normalized_codes:
         return []
-    day_start, day_end = business_day_utc_bounds()
+    # Filtra por estado + código en SQL y por "día de negocio" en Python con
+    # ensure_business_tz (igual que list_registered_packages). Antes se filtraba
+    # created_at contra business_day_utc_bounds() en SQL: en SQLite —que no
+    # preserva tz— eso compara la hora de pared (Lima) contra límites en UTC y
+    # excluye registros válidos durante la madrugada de Lima (Riesgo R1 / DEF-002).
+    hoy = business_today()
     shipments = (
         db.query(Shipment)
         .filter(
             Shipment.status.in_(OPTIMIZABLE_SHIPMENT_STATUSES),
             Shipment.shipment_code.in_(normalized_codes),
-            Shipment.created_at >= day_start,
-            Shipment.created_at <= day_end,
         )
         .all()
     )
-    shipment_by_code = {shipment.shipment_code.upper(): shipment for shipment in shipments}
+    shipment_by_code = {
+        shipment.shipment_code.upper(): shipment
+        for shipment in shipments
+        if ensure_business_tz(shipment.created_at).date() == hoy
+    }
     return [
         _shipment_to_package(shipment_by_code[code])
         for code in normalized_codes

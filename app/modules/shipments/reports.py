@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from datetime import date
-from html import escape
 from io import BytesIO
 
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import getSampleStyleSheet
@@ -132,26 +133,25 @@ def generate_operational_report_pdf(db: Session, **filters) -> bytes:
 
 
 def generate_operational_report_excel(db: Session, **filters) -> bytes:
+    """Genera un archivo Excel real (.xlsx / OOXML) con openpyxl."""
     rows = build_operational_report_rows(db, **filters)
-    xml_rows = [_excel_row(REPORT_HEADERS, header=True)]
-    xml_rows.extend(_excel_row(row) for row in rows)
-    content = f"""<?xml version="1.0" encoding="UTF-8"?>
-<?mso-application progid="Excel.Sheet"?>
-<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
- xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
- <Styles>
-  <Style ss:ID="Header">
-   <Font ss:Bold="1" ss:Color="#FFFFFF"/>
-   <Interior ss:Color="#28A745" ss:Pattern="Solid"/>
-  </Style>
- </Styles>
- <Worksheet ss:Name="Encomiendas">
-  <Table>
-   {''.join(xml_rows)}
-  </Table>
- </Worksheet>
-</Workbook>"""
-    return content.encode("utf-8")
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.title = "Encomiendas"
+
+    worksheet.append(REPORT_HEADERS)
+    header_fill = PatternFill(start_color="28A745", end_color="28A745", fill_type="solid")
+    header_font = Font(bold=True, color="FFFFFF")
+    for cell in worksheet[1]:
+        cell.fill = header_fill
+        cell.font = header_font
+
+    for row in rows:
+        worksheet.append(row)
+
+    buffer = BytesIO()
+    workbook.save(buffer)
+    return buffer.getvalue()
 
 
 def _filter_shipments(
@@ -199,12 +199,3 @@ def _payment_status(shipment: Shipment, receipt: ElectronicReceipt | None) -> st
 
 def _format_datetime(value: datetime | None) -> str:
     return value.strftime("%d/%m/%Y %H:%M") if value else "-"
-
-
-def _excel_row(values: list[str], *, header: bool = False) -> str:
-    style = ' ss:StyleID="Header"' if header else ""
-    cells = "".join(
-        f'<Cell{style}><Data ss:Type="String">{escape(str(value))}</Data></Cell>'
-        for value in values
-    )
-    return f"<Row>{cells}</Row>"

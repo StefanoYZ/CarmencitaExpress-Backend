@@ -33,3 +33,14 @@ REGISTRATION_ORIGIN_VALUES = {
 }
 
 FRAGILITY_VALUES = {"BAJA", "MEDIA", "ALTA"}
+
+# Límites físicos del servicio, derivados de la capacidad del vehículo
+# (491 x 210 x 220 cm, 5470 kg). Actúan como cota superior de sanidad: un peso o
+# una dimensión por encima de estos valores no puede transportarse y casi siempre
+# es un error de tipeo. El mínimo es estrictamente > 0 (ver validadores).
+MAX_WEIGHT_KG = 5470.0
+MAX_DIMENSION_CM = 491.0
+
+# Un sobre (tipo_contenido DOCUMENTOS) no puede pesar mas de 1.5 kg: por encima de
+# eso ya no es documentacion sino un paquete y debe registrarse como tal.
+MAX_ENVELOPE_WEIGHT_KG = 1.5
