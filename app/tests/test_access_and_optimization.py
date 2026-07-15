@@ -72,19 +72,23 @@ def test_admin_cannot_run_optimization(api_client, admin_headers):
         "/api/v1/optimization/poc/first-fit/run",
         "/api/v1/optimization/poc/best-fit/run",
         "/api/v1/optimization/poc/backtracking/run",
+        "/api/v1/optimization/poc/worst-fit/run",
+        "/api/v1/optimization/poc/best-fit-decreasing/run",
+        "/api/v1/optimization/poc/minimax-maximin/run",
     ],
 )
-def test_inactive_optimization_algorithms_are_disabled(
+def test_all_optimization_algorithms_are_enabled(
     api_client,
     estiba_headers,
     path,
 ):
+    # Los 7 modelos estan habilitados para poder probarlos desde la interfaz.
     response = api_client.post(
         path,
         headers=estiba_headers,
         json={"truck_id": "CAMION_A", "package_limit": 12, "allow_rotation": True},
     )
-    assert response.status_code == 410, response.text
+    assert response.status_code == 200, response.text
 
 
 def test_best_fit_decreasing_uses_registered_shipments_and_skips_envelopes(
@@ -111,6 +115,7 @@ def test_best_fit_decreasing_uses_registered_shipments_and_skips_envelopes(
         "descripcion": "Sobre sin estiba",
         "destino": "Cachicadan",
         "tipo_contenido": "DOCUMENTOS",
+        "peso_kg": 1.0,
         "largo_cm": 0,
         "ancho_cm": 0,
         "alto_cm": 0,
