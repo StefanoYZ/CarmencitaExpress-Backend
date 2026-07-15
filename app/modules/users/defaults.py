@@ -201,7 +201,7 @@ BASE_ROLE_PERMISSIONS = {
     "ADMINISTRADOR": [
         permission["code"]
         for permission in BASE_PERMISSIONS
-        if not permission["code"].startswith("optimization.")
+        if not permission["code"].startswith(("optimization.", "developer."))
     ],
     "SECRETARIA": [
         "encomiendas.read",
