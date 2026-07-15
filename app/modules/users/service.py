@@ -20,7 +20,13 @@ from app.modules.users.schema import (
 
 
 def list_users(db: Session) -> list[UserResponse]:
-    return [build_user_response(user) for user in repository.list_users(db)]
+    # Los usuarios con rol DEVELOPER se ocultan del listado de administracion
+    # (son cuentas tecnicas del equipo, no visibles para el docente/administrador).
+    return [
+        build_user_response(user)
+        for user in repository.list_users(db)
+        if not any(role.name == "DEVELOPER" for role in user.roles)
+    ]
 
 
 def get_user(db: Session, user_id: int) -> UserResponse | None:
