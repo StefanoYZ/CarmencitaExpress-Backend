@@ -274,7 +274,7 @@ def seed_initial_access_control(db: Session) -> AssignmentResponse:
             permissions_to_remove = [
                 permission
                 for permission in role.permissions
-                if permission.code.startswith("optimization.")
+                if permission.code.startswith(("optimization.", "developer."))
                 and permission.code not in desired_codes
             ]
 

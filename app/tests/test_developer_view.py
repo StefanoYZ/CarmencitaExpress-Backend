@@ -33,9 +33,11 @@ def test_estiba_no_accede_a_developer_view(api_client, estiba_headers):
     assert response.status_code == 403
 
 
-def test_admin_accede_a_developer_view(api_client, admin_headers):
+def test_admin_no_accede_a_developer_view(api_client, admin_headers):
+    # La vista developer es exclusiva del rol DEVELOPER; el ADMINISTRADOR ya no
+    # tiene los permisos developer.* (evaluacion asincrona del docente).
     response = api_client.get("/api/v1/developer/tablas", headers=admin_headers)
-    assert response.status_code == 200, response.text
+    assert response.status_code == 403, response.text
 
 
 def test_developer_lista_tablas_ordenadas_con_conteo(api_client, db_session):
