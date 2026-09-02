@@ -1,3 +1,7 @@
+# Configuracion local de asistentes
+CLAUDE.md
+.claude/settings.local.json
+
 # Entornos virtuales
 .venv/
 venv/
@@ -9,36 +13,35 @@ env/
 !.env.example
 !**/.env.example
 
-# Python
+# Python y cobertura
 __pycache__/
 *.py[cod]
 .pytest_cache/
 .mypy_cache/
-# Entorno virtual
-venv/
-.env
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
 
-# Python
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
 # IDE
 .idea/
 .vscode/
 
-# Logs
+# Logs y resultados de pruebas
 *.log
+*.jtl
+tests/carga/reporte_html/
 
-# Lycet externo / repo clonado
-external/lycet-master/
-
-# OS
-.DS_Store
-Thumbs.db
-
+# Dependencias externas locales
+external/
+external.zip
 
 # Respaldos de BD (datos reales, no subir)
 backups/
 
+# Documentacion de trabajo local
 docs/
+
+# OS
+.DS_Store
+Thumbs.db

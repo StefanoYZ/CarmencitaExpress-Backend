@@ -6,8 +6,7 @@ registro, el de mayor tráfico esperado).
 - `carmencita_preregistro.jmx` — plan JMeter (2 escenarios: disponibilidad + carga).
 - `preregistro_data.csv` — datos parametrizados (DNI + destino) que rotan entre hilos.
 
-La documentación completa (objetivos, umbrales/SLA, interpretación de métricas)
-está en [`docs/pruebas/PRUEBAS_CARGA_JMETER.md`](../../docs/pruebas/PRUEBAS_CARGA_JMETER.md).
+Los parámetros y el umbral SLA del escenario smoke se describen abajo.
 
 ## Requisitos
 - Apache JMeter 5.6+ (`https://jmeter.apache.org/download_jmeter.cgi`), requiere Java 8+.
@@ -30,7 +29,7 @@ jmeter -n -t carmencita_preregistro.jmx -l resultados_carga.jtl \
 jmeter -g resultados_carga.jtl -o reporte_html/
 ```
 
-> Contra el Droplet en producción: `-Jhost=159.203.167.45 -Jport=80`. Ten en
+> Contra un Droplet de prueba: `-Jhost=IP_DEL_DROPLET -Jport=80`. Ten en
 > cuenta que cada envío crea un pre-registro real en la BD; usa un entorno de
 > prueba o limpia los registros generados después.
 

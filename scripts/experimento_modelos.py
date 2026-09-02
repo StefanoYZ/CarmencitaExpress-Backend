@@ -14,7 +14,7 @@ FORMA y la HETEROGENEIDAD de los paquetes sobre la calidad del acomodo.
 Uso (desde la raiz del backend, con el venv):
     PYTHONPATH=. .venv/Scripts/python.exe scripts/experimento_modelos.py
 
-Los resultados de referencia estan documentados en docs/comparacion-modelos.md.
+Cada ejecucion imprime el detalle por escenario y el ranking agregado.
 """
 from __future__ import annotations
 
