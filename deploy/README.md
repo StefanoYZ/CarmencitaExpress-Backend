@@ -27,21 +27,24 @@ normal interactive Google login when necessary, enables APIs, and creates:
 - A GitHub OIDC provider restricted to `CarmencitaExpress-Backend` and
   `Front-Carmencita`, plus their service-account bindings
 - Firebase resources and the default Hosting site for the frontend
-- An optional USD 10 billing budget with 50%, 90%, and 100% thresholds
+- An optional billing budget when `-BudgetUsd` is explicitly provided
 
 The script is safe to rerun. Existing resources and enabled secret versions are
 reused. It prints the exact GitHub repository variables required by the
 workflow when complete. Set `CORS_ORIGINS` to the deployed frontend origin.
 
 If `-BillingAccount` is omitted, the script uses the only open billing account.
-It always requires confirmation that the selected account is still a Free
-Trial account before creating Cloud SQL.
+Before creating Cloud SQL, it requires confirmation that the remaining
+promotional credit and its expiration date were reviewed. An activated billing
+account can charge its payment method after that credit expires or is exhausted.
+This project already has a PEN 50 console budget, so the script does not create
+another budget unless `-BudgetUsd` is supplied.
 
 ## Cost controls
 
 Cloud Run is configured with minimum instances `0`, maximum instances `1`,
-concurrency `4`, one CPU, and 512 MiB memory. Cloud SQL has no always-free tier,
-including on a Free Trial account. The bootstrap therefore uses the smallest
+concurrency `4`, one CPU, and 512 MiB memory. Cloud SQL has no always-free tier.
+The bootstrap therefore uses the smallest
 shared-core tier, zonal availability, 10 GB storage, and disables storage
 auto-growth. Budgets alert but do not automatically stop spending. Delete the
 Cloud SQL instance when the environment is no longer needed.
