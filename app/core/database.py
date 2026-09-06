@@ -83,9 +83,9 @@ def sync_development_schema() -> None:
     create_all() creates new tables but does not alter existing ones, so this
     keeps local PostgreSQL schemas compatible with the SQLAlchemy models.
     """
-    inspector = inspect(engine)
-
     with engine.begin() as connection:
+        # Reuse the migration transaction so a bootstrap job can run with one DB connection.
+        inspector = inspect(connection)
         for table in Base.metadata.sorted_tables:
             if not inspector.has_table(table.name):
                 continue
