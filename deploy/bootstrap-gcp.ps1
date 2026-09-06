@@ -208,7 +208,7 @@ if (-not (Test-GcloudResource @("artifacts", "repositories", "describe", $Artifa
 
 if (-not (Test-GcloudResource @("sql", "instances", "describe", $CloudSqlInstance, "--project", $ProjectId))) {
     Write-Warning "Creating the billable Cloud SQL instance with a shared-core, zonal, 10 GB configuration and storage auto-growth disabled."
-    Invoke-Gcloud sql instances create $CloudSqlInstance --project $ProjectId --region $Region --database-version POSTGRES_16 --tier db-f1-micro --availability-type zonal --storage-type SSD --storage-size 10 --no-storage-auto-increase
+    Invoke-Gcloud sql instances create $CloudSqlInstance --project $ProjectId --region $Region --database-version POSTGRES_16 --edition enterprise --tier db-f1-micro --availability-type zonal --storage-type SSD --storage-size 10 --no-storage-auto-increase
 }
 
 if (-not (Test-GcloudResource @("sql", "databases", "describe", $DatabaseName, "--instance", $CloudSqlInstance, "--project", $ProjectId))) {

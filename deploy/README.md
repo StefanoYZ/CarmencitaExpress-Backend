@@ -37,8 +37,8 @@ If `-BillingAccount` is omitted, the script uses the only open billing account.
 Before creating Cloud SQL, it requires confirmation that the remaining
 promotional credit and its expiration date were reviewed. An activated billing
 account can charge its payment method after that credit expires or is exhausted.
-This project already has a PEN 50 console budget, so the script does not create
-another budget unless `-BudgetUsd` is supplied.
+This project already has a console budget, so the script does not create another
+budget unless `-BudgetUsd` is supplied.
 
 ## Cost controls
 
