@@ -122,7 +122,7 @@ jobs:
           env_vars: |-
             APP_NAME=Carmencita Smart System
             API_PREFIX=/api/v1
-            CORS_ORIGINS="${{ vars.CORS_ORIGINS }}"
+            CORS_ORIGINS=${{ replace(vars.CORS_ORIGINS, ',', '\,') }}
             DB_USER=${{ vars.GCP_DB_USER }}
             DB_NAME=${{ vars.GCP_DB_NAME }}
             INSTANCE_UNIX_SOCKET=/cloudsql/${{ vars.GCP_PROJECT_ID }}:${{ vars.GCP_REGION }}:${{ vars.GCP_CLOUD_SQL_INSTANCE }}
