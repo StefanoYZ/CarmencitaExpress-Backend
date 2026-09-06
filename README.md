@@ -101,8 +101,8 @@ URLs utiles:
 El procedimiento completo y el bootstrap idempotente para PowerShell estan en
 [`deploy/README.md`](deploy/README.md). La configuracion predeterminada usa
 `southamerica-west1`, escala Cloud Run de cero a una instancia y mantiene SUNAT
-en modo `mock`. Cloud SQL es facturable incluso durante la prueba gratuita;
-revisa el presupuesto y los controles de costo antes de crearlo.
+en modo `mock`. Cloud SQL consume credito promocional mientras quede saldo y
+puede generar cargos al agotarse; revisa el presupuesto antes de crearlo.
 
 ## Endpoints Principales
 

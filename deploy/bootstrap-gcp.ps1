@@ -17,7 +17,7 @@ param(
     [string]$CloudSqlInstance = "carmencita-postgres",
     [string]$DatabaseName = "carmencita_db",
     [string]$DatabaseUser = "carmencita",
-    [decimal]$BudgetUsd = 10
+    [decimal]$BudgetUsd = 0
 )
 
 $ErrorActionPreference = "Stop"
@@ -155,9 +155,9 @@ if (-not $BillingAccount) {
     $BillingAccount = $billingAccounts[0] -replace '^billingAccounts/', ''
 }
 
-Write-Warning "Cloud SQL consumes trial credit. Confirm in the Billing console that this is a Free Trial account and do not activate a paid account."
-$confirmation = Read-Host "Type FREE-TRIAL after confirming the billing account type"
-if ($confirmation -ne "FREE-TRIAL") {
+Write-Warning "Cloud SQL consumes promotional credit while it remains available. This paid billing account can charge its payment method after the credit expires or is exhausted."
+$confirmation = Read-Host "Type CREDITS-VERIFIED after checking the remaining credit and expiration date"
+if ($confirmation -ne "CREDITS-VERIFIED") {
     throw "Bootstrap cancelled before billable resources were created."
 }
 Invoke-Gcloud billing projects link $ProjectId --billing-account $BillingAccount
@@ -208,7 +208,7 @@ if (-not (Test-GcloudResource @("artifacts", "repositories", "describe", $Artifa
 
 if (-not (Test-GcloudResource @("sql", "instances", "describe", $CloudSqlInstance, "--project", $ProjectId))) {
     Write-Warning "Creating the billable Cloud SQL instance with a shared-core, zonal, 10 GB configuration and storage auto-growth disabled."
-    Invoke-Gcloud sql instances create $CloudSqlInstance --project $ProjectId --region $Region --database-version POSTGRES_16 --tier db-f1-micro --availability-type zonal --storage-type SSD --storage-size 10 --no-storage-auto-increase
+    Invoke-Gcloud sql instances create $CloudSqlInstance --project $ProjectId --region $Region --database-version POSTGRES_16 --edition enterprise --tier db-f1-micro --availability-type zonal --storage-type SSD --storage-size 10 --no-storage-auto-increase
 }
 
 if (-not (Test-GcloudResource @("sql", "databases", "describe", $DatabaseName, "--instance", $CloudSqlInstance, "--project", $ProjectId))) {
@@ -274,7 +274,7 @@ Write-Host "GCP_DEPLOY_SERVICE_ACCOUNT=$deployAccount"
 Write-Host "GCP_WORKLOAD_IDENTITY_PROVIDER=$providerName"
 Write-Host "GCP_DB_USER=$DatabaseUser"
 Write-Host "GCP_DB_NAME=$DatabaseName"
-Write-Host "CORS_ORIGINS=https://your-frontend.example"
-Write-Host "Frontend repository: set GCP_SERVICE_ACCOUNT=$deployAccount (or GCP_DEPLOY_SERVICE_ACCOUNT with the unified workflow)."
+Write-Host "CORS_ORIGINS=https://$ProjectId.web.app,https://$ProjectId.firebaseapp.com"
+Write-Host "Frontend repository: set GCP_DEPLOY_SERVICE_ACCOUNT=$deployAccount"
 Write-Host ""
 Write-Host "No Google service-account key or GitHub JSON secret is required."
