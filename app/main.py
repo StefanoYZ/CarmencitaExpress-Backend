@@ -1,8 +1,9 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.core.database import SessionLocal, create_db_tables
+from app.core.database import database_is_ready
 from app.core.config import settings
+from app.db_bootstrap import bootstrap_database
 from app.modules.auth.router import router as auth_router
 from app.modules.clients.router import router as clients_router
 from app.modules.charge_logs.router import router as charge_logs_router
@@ -15,8 +16,6 @@ from app.modules.reniec.router import router as reniec_router
 from app.modules.shipments.router import router as shipments_router
 from app.modules.sunat.router import router as sunat_router
 from app.modules.users.router import permissions_router, roles_router, users_router
-from app.modules.users.service import seed_initial_access_control
-from app.modules.destinations.service import seed_default_destinations
 from app.modules.asistente.router import (
     asistente_router,
     base_conocimiento_router,
@@ -33,10 +32,7 @@ app = FastAPI(title=settings.app_name)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,
-    # En produccion (Droplet), nginx expone frontend y backend bajo el mismo
-    # origen via reverse proxy (ver deploy/docker-compose.yml + nginx.conf), asi
-    # que el navegador no hace peticiones cross-origin. Este regex solo cubre
-    # desarrollo local (Vite en localhost) y accesos directos al backend sin proxy.
+    # Keep arbitrary local Vite ports available during development.
     allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
@@ -69,18 +65,20 @@ app.include_router(tipos_contenido_router, prefix=settings.api_prefix)
 
 @app.on_event("startup")
 def startup() -> None:
-    create_db_tables()
-    db = SessionLocal()
-    try:
-        seed_initial_access_control(db)
-        seed_default_destinations(db)
-    finally:
-        db.close()
+    if settings.auto_create_schema:
+        bootstrap_database()
 
 
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok", "app": settings.app_name}
+
+
+@app.get("/ready")
+def ready() -> dict[str, str]:
+    if not database_is_ready():
+        raise HTTPException(status_code=503, detail="database unavailable")
+    return {"status": "ready"}
 
 
 @app.get("/")

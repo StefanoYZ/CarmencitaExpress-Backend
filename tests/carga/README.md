@@ -11,7 +11,7 @@ está en [`docs/pruebas/PRUEBAS_CARGA_JMETER.md`](../../docs/pruebas/PRUEBAS_CAR
 
 ## Requisitos
 - Apache JMeter 5.6+ (`https://jmeter.apache.org/download_jmeter.cgi`), requiere Java 8+.
-- Backend levantado y accesible (local o Droplet).
+- Backend levantado y accesible (local o Cloud Run).
 
 ## Ejecución rápida (modo CLI, sin GUI — recomendado para medir)
 
@@ -30,9 +30,9 @@ jmeter -n -t carmencita_preregistro.jmx -l resultados_carga.jtl \
 jmeter -g resultados_carga.jtl -o reporte_html/
 ```
 
-> Contra el Droplet en producción: `-Jhost=159.203.167.45 -Jport=80`. Ten en
-> cuenta que cada envío crea un pre-registro real en la BD; usa un entorno de
-> prueba o limpia los registros generados después.
+> Contra Cloud Run usa el host HTTPS del servicio con `-Jprotocol=https` y
+> `-Jport=443`. Cada envio crea un pre-registro real; usa un entorno de prueba o
+> limpia los registros generados despues.
 
 ## Parámetros (`-J`)
 | Propiedad | Default | Descripción |

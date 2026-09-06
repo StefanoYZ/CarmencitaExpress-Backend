@@ -6,6 +6,7 @@ env/
 # Variables de entorno
 .env
 .env.*
+gha-creds-*.json
 !.env.example
 !**/.env.example
 

@@ -13,8 +13,10 @@ Backend FastAPI para Carmencita Smart System. Este repositorio contiene solo el 
 - Mercado Pago / Yape para pagos
 - RENIEC como API externa
 - Docker (Dockerfile en la raiz) para contenerizar el backend
+- Google Cloud Run, Cloud SQL, Artifact Registry y Secret Manager
 
-Kubernetes, Jenkins y AWS no forman parte del alcance del proyecto.
+El despliegue continuo usa GitHub Actions con Workload Identity Federation, sin
+claves JSON de cuentas de servicio.
 
 ## Estructura De Modulos
 
@@ -42,6 +44,9 @@ Las rutas publicas se mantienen en espanol por compatibilidad con Postman y el f
 APP_NAME=Carmencita Smart System
 API_PREFIX=/api/v1
 DATABASE_URL=postgresql+psycopg2://postgres:password@localhost:5432/carmencita_db
+AUTO_CREATE_SCHEMA=true
+DB_POOL_SIZE=2
+DB_MAX_OVERFLOW=0
 SUNAT_ENV=mock
 SUNAT_PROVIDER=lycet
 SUNAT_ALLOW_REAL_EMISSION=false
@@ -57,6 +62,11 @@ MERCADOPAGO_ACCESS_TOKEN=your_mercadopago_access_token
 
 No subir al repositorio archivos `.env`, tokens reales, certificados ni credenciales de SUNAT/Lycet.
 
+En Cloud Run no se construye `DATABASE_URL`. Se usan `DB_USER`, `DB_PASSWORD`,
+`DB_NAME` e `INSTANCE_UNIX_SOCKET`, lo que admite contrasenas con caracteres
+reservados sin codificarlas como URL. `DB_PASSWORD`, `SECRET_KEY` y
+`DEFAULT_ADMIN_PASSWORD` provienen de Secret Manager.
+
 ## Ejecucion Local
 
 Crear la base de datos vacia en PostgreSQL:
@@ -65,7 +75,9 @@ Crear la base de datos vacia en PostgreSQL:
 CREATE DATABASE carmencita_db;
 ```
 
-El backend crea automaticamente las tablas nuevas en desarrollo usando SQLAlchemy `create_all`. Los ajustes sobre bases existentes se documentan mediante scripts SQL idempotentes.
+El backend crea automaticamente tablas y semillas en desarrollo porque
+`AUTO_CREATE_SCHEMA` vale `true` por defecto. En Cloud Run vale `false`; el
+workflow ejecuta primero un Job con `python -m app.db_bootstrap`.
 
 ```powershell
 pip install -r requirements.txt
@@ -81,12 +93,22 @@ uvicorn app.main:app --host 127.0.0.1 --port 8002
 URLs utiles:
 
 - Health: `GET http://127.0.0.1:8000/health`
+- Readiness de PostgreSQL: `GET http://127.0.0.1:8000/ready`
 - Swagger docs: `http://127.0.0.1:8000/docs`
+
+## Despliegue En Google Cloud
+
+El procedimiento completo y el bootstrap idempotente para PowerShell estan en
+[`deploy/README.md`](deploy/README.md). La configuracion predeterminada usa
+`southamerica-west1`, escala Cloud Run de cero a una instancia y mantiene SUNAT
+en modo `mock`. Cloud SQL es facturable incluso durante la prueba gratuita;
+revisa el presupuesto y los controles de costo antes de crearlo.
 
 ## Endpoints Principales
 
 General:
 - `GET /health`
+- `GET /ready`
 - `GET /`
 
 Clientes:

@@ -3,7 +3,7 @@ import logging
 import time
 
 from sqlalchemy import create_engine, inspect, text
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import OperationalError, SQLAlchemyError
 from sqlalchemy.orm import Session, declarative_base, sessionmaker
 
 from app.core.business_time import BUSINESS_TIMEZONE_NAME
@@ -15,9 +15,12 @@ logger = logging.getLogger(__name__)
 engine = create_engine(
     settings.sqlalchemy_database_url,
     pool_pre_ping=True,
-    pool_recycle=300,
+    pool_size=settings.db_pool_size,
+    max_overflow=settings.db_max_overflow,
+    pool_timeout=settings.db_pool_timeout,
+    pool_recycle=settings.db_pool_recycle,
     connect_args={
-        "connect_timeout": 10,
+        "connect_timeout": settings.db_connect_timeout,
         "options": f"-c timezone={BUSINESS_TIMEZONE_NAME}",
     },
 )
@@ -61,8 +64,8 @@ def create_db_tables(max_attempts: int = 5, retry_delay_seconds: int = 3) -> Non
         except OperationalError:
             if attempt == max_attempts:
                 logger.exception(
-                    "No se pudo conectar a PostgreSQL. Verifica DATABASE_URL y que "
-                    "la base Render este en la misma region si usas la URL interna."
+                    "No se pudo conectar a PostgreSQL. Verifica DATABASE_URL o la "
+                    "configuracion de Cloud SQL."
                 )
                 raise
             logger.warning(
@@ -116,3 +119,13 @@ def sync_development_schema() -> None:
                             f'WHERE "{timestamp_column}" IS NULL'
                         )
                     )
+
+
+def database_is_ready() -> bool:
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+        return True
+    except SQLAlchemyError:
+        logger.warning("La comprobacion de disponibilidad de PostgreSQL fallo.")
+        return False

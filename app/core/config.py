@@ -3,6 +3,7 @@ from typing import Literal, Optional
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy.engine import URL
 
 
 class Settings(BaseSettings):
@@ -16,6 +17,16 @@ class Settings(BaseSettings):
         default="postgresql+psycopg2://postgres:password@localhost:5432/carmencita_db",
         alias="DATABASE_URL",
     )
+    db_user: Optional[str] = Field(default=None, alias="DB_USER")
+    db_password: Optional[str] = Field(default=None, alias="DB_PASSWORD")
+    db_name: Optional[str] = Field(default=None, alias="DB_NAME")
+    instance_unix_socket: Optional[str] = Field(default=None, alias="INSTANCE_UNIX_SOCKET")
+    db_pool_size: int = Field(default=2, ge=1, alias="DB_POOL_SIZE")
+    db_max_overflow: int = Field(default=0, ge=0, alias="DB_MAX_OVERFLOW")
+    db_pool_timeout: int = Field(default=30, ge=1, alias="DB_POOL_TIMEOUT")
+    db_pool_recycle: int = Field(default=300, ge=1, alias="DB_POOL_RECYCLE")
+    db_connect_timeout: int = Field(default=10, ge=1, alias="DB_CONNECT_TIMEOUT")
+    auto_create_schema: bool = Field(default=True, alias="AUTO_CREATE_SCHEMA")
 
     # Configuracion SUNAT / Lycet
     sunat_env: Literal["mock", "beta", "production"] = Field(default="mock", alias="SUNAT_ENV")
@@ -60,7 +71,29 @@ class Settings(BaseSettings):
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
 
     @property
-    def sqlalchemy_database_url(self) -> str:
+    def sqlalchemy_database_url(self) -> str | URL:
+        if self.instance_unix_socket:
+            missing = [
+                name
+                for name, value in (
+                    ("DB_USER", self.db_user),
+                    ("DB_PASSWORD", self.db_password),
+                    ("DB_NAME", self.db_name),
+                )
+                if not value
+            ]
+            if missing:
+                raise ValueError(
+                    "Cloud SQL socket configuration requires " + ", ".join(missing)
+                )
+            return URL.create(
+                drivername="postgresql+psycopg2",
+                username=self.db_user,
+                password=self.db_password,
+                host=self.instance_unix_socket,
+                database=self.db_name,
+            )
+
         value = self.database_url.strip()
         if value.startswith("postgres://"):
             return value.replace("postgres://", "postgresql+psycopg2://", 1)
