@@ -1,4 +1,4 @@
-name: Test and Deploy Backend
+name: Test, Build and Deploy Backend
 
 on:
   push:
@@ -8,6 +8,10 @@ on:
 concurrency:
   group: deploy-backend
   cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
 
 jobs:
   test:
@@ -19,68 +23,140 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          cache: "pip"
+          cache: pip
 
-      - name: Instalar dependencias
+      - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Ejecutar pruebas unitarias
+      - name: Run tests
         run: python -m pytest -q
 
   deploy:
-    name: Deploy al Droplet
+    name: Build and deploy to Cloud Run
     needs: test
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    env:
+      PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      REGION: ${{ vars.GCP_REGION }}
+      AR_REPOSITORY: ${{ vars.GCP_ARTIFACT_REGISTRY_REPOSITORY }}
+      SERVICE: ${{ vars.GCP_CLOUD_RUN_SERVICE }}
+      BOOTSTRAP_JOB: ${{ vars.GCP_CLOUD_RUN_BOOTSTRAP_JOB }}
+      SQL_INSTANCE: ${{ vars.GCP_CLOUD_SQL_INSTANCE }}
+      RUNTIME_SERVICE_ACCOUNT: ${{ vars.GCP_RUNTIME_SERVICE_ACCOUNT }}
+      DEPLOY_SERVICE_ACCOUNT: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+      DB_USER: ${{ vars.GCP_DB_USER }}
+      DB_NAME: ${{ vars.GCP_DB_NAME }}
+      CORS_ORIGINS: ${{ vars.CORS_ORIGINS }}
     steps:
-      - name: Actualizar .env y reconstruir solo "backend"
-        uses: appleboy/ssh-action@v1
-        env:
-          ENV_FILE: ${{ secrets.ENV_FILE }}
+      - uses: actions/checkout@v4
+
+      - name: Validate repository variables
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in PROJECT_ID REGION AR_REPOSITORY SERVICE BOOTSTRAP_JOB SQL_INSTANCE RUNTIME_SERVICE_ACCOUNT DEPLOY_SERVICE_ACCOUNT WORKLOAD_IDENTITY_PROVIDER DB_USER DB_NAME CORS_ORIGINS; do
+            if [[ -z "${!name}" ]]; then
+              echo "Missing required repository variable for ${name}" >&2
+              exit 1
+            fi
+          done
+
+      - id: auth
+        name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
         with:
-          host: ${{ secrets.DROPLET_HOST }}
-          username: ${{ secrets.DROPLET_USER }}
-          key: ${{ secrets.DROPLET_SSH_KEY }}
-          envs: ENV_FILE
-          script: |
-            set -euo pipefail
+          workload_identity_provider: ${{ env.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SERVICE_ACCOUNT }}
 
-            # Fusiona ENV_FILE con el .env existente en vez de sobreescribirlo
-            # entero: cualquier clave que NO venga en el secret (p. ej.
-            # LYCET_LOGO_BASE64, omitida por el limite de tamano de GitHub
-            # Secrets) se conserva tal cual esta en el Droplet.
-            python3 - /opt/carmencita/deploy/.env <<'PYEOF'
-            import os, sys
-            path = sys.argv[1]
-            new_content = os.environ["ENV_FILE"]
-            current, order = {}, []
-            if os.path.exists(path):
-                with open(path) as f:
-                    for line in f:
-                        stripped = line.rstrip("\n")
-                        if not stripped or stripped.startswith("#") or "=" not in stripped:
-                            continue
-                        key, _, value = stripped.partition("=")
-                        current[key] = value
-                        order.append(key)
-            for line in new_content.splitlines():
-                stripped = line.strip()
-                if not stripped or stripped.startswith("#") or "=" not in stripped:
-                    continue
-                key, _, value = stripped.partition("=")
-                if key not in current:
-                    order.append(key)
-                current[key] = value
-            with open(path, "w") as f:
-                for key in order:
-                    f.write(f"{key}={current[key]}\n")
-            PYEOF
+      - uses: google-github-actions/setup-gcloud@v3
 
-            # Clon dedicado a CI: siempre se alinea con origin/main, sin merges.
-            cd /opt/carmencita/CarmencitaExpress-Backend
-            git fetch origin main
-            git reset --hard origin/main
+      - name: Configure Artifact Registry authentication
+        run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
 
-            cd /opt/carmencita/deploy
-            docker compose up --build -d --remove-orphans backend
-            docker image prune -f
+      - name: Build and push immutable image
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPOSITORY}/backend:${GITHUB_SHA}"
+          docker build --tag "${IMAGE}" .
+          docker push "${IMAGE}"
+          echo "IMAGE=${IMAGE}" >> "${GITHUB_ENV}"
+
+      - name: Create or update database bootstrap job
+        shell: bash
+        run: |
+          set -euo pipefail
+          CONNECTION_NAME="${PROJECT_ID}:${REGION}:${SQL_INSTANCE}"
+          gcloud run jobs deploy "${BOOTSTRAP_JOB}" \
+            --project "${PROJECT_ID}" \
+            --region "${REGION}" \
+            --image "${IMAGE}" \
+            --service-account "${RUNTIME_SERVICE_ACCOUNT}" \
+            --set-cloudsql-instances "${CONNECTION_NAME}" \
+            --command python \
+            --args=-m,app.db_bootstrap \
+            --set-env-vars "DB_USER=${DB_USER},DB_NAME=${DB_NAME},INSTANCE_UNIX_SOCKET=/cloudsql/${CONNECTION_NAME},DB_POOL_SIZE=1,DB_MAX_OVERFLOW=0,DB_POOL_TIMEOUT=30,DB_CONNECT_TIMEOUT=10,SUNAT_ENV=mock,SUNAT_ALLOW_REAL_EMISSION=false" \
+            --set-secrets "DB_PASSWORD=carmencita-db-password:latest,SECRET_KEY=carmencita-secret-key:latest,DEFAULT_ADMIN_PASSWORD=carmencita-admin-password:latest" \
+            --max-retries 1 \
+            --task-timeout 10m \
+            --quiet
+
+      - name: Bootstrap database
+        run: >-
+          gcloud run jobs execute "${BOOTSTRAP_JOB}"
+          --project "${PROJECT_ID}"
+          --region "${REGION}"
+          --wait
+          --quiet
+
+      - id: deploy
+        name: Deploy Cloud Run service
+        uses: google-github-actions/deploy-cloudrun@v3
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+          region: ${{ vars.GCP_REGION }}
+          service: ${{ vars.GCP_CLOUD_RUN_SERVICE }}
+          image: ${{ env.IMAGE }}
+          env_vars: |-
+            APP_NAME=Carmencita Smart System
+            API_PREFIX=/api/v1
+            CORS_ORIGINS="${{ vars.CORS_ORIGINS }}"
+            DB_USER=${{ vars.GCP_DB_USER }}
+            DB_NAME=${{ vars.GCP_DB_NAME }}
+            INSTANCE_UNIX_SOCKET=/cloudsql/${{ vars.GCP_PROJECT_ID }}:${{ vars.GCP_REGION }}:${{ vars.GCP_CLOUD_SQL_INSTANCE }}
+            DB_POOL_SIZE=2
+            DB_MAX_OVERFLOW=0
+            DB_POOL_TIMEOUT=30
+            DB_POOL_RECYCLE=300
+            DB_CONNECT_TIMEOUT=10
+            AUTO_CREATE_SCHEMA=false
+            SUNAT_ENV=mock
+            SUNAT_ALLOW_REAL_EMISSION=false
+            ASSISTANT_LLM_ENABLED=false
+          env_vars_update_strategy: overwrite
+          secrets: |-
+            DB_PASSWORD=carmencita-db-password:latest
+            SECRET_KEY=carmencita-secret-key:latest
+            DEFAULT_ADMIN_PASSWORD=carmencita-admin-password:latest
+          secrets_update_strategy: overwrite
+          flags: >-
+            --service-account=${{ vars.GCP_RUNTIME_SERVICE_ACCOUNT }}
+            --add-cloudsql-instances=${{ vars.GCP_PROJECT_ID }}:${{ vars.GCP_REGION }}:${{ vars.GCP_CLOUD_SQL_INSTANCE }}
+            --allow-unauthenticated
+            --min=0
+            --max=1
+            --concurrency=4
+            --cpu=1
+            --memory=512Mi
+            --port=8080
+
+      - name: Smoke test
+        env:
+          SERVICE_URL: ${{ steps.deploy.outputs.url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --retry 10 --retry-delay 3 --retry-all-errors "${SERVICE_URL}/health"
+          curl --fail --show-error --silent --retry 10 --retry-delay 3 --retry-all-errors "${SERVICE_URL}/ready"
