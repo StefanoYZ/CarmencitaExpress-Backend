@@ -12,6 +12,21 @@ def get_receipt_by_shipment(db: Session, shipment_id: int) -> ElectronicReceipt 
     )
 
 
+def get_receipt_by_series_number(
+    db: Session,
+    series: str,
+    number: str,
+) -> ElectronicReceipt | None:
+    return (
+        db.query(ElectronicReceipt)
+        .filter(
+            ElectronicReceipt.series == series,
+            ElectronicReceipt.number == number,
+        )
+        .first()
+    )
+
+
 def get_next_receipt_number(db: Session, series: str) -> str:
     if db.bind and db.bind.dialect.name == "postgresql":
         db.execute(text("LOCK TABLE boletas_electronicas IN EXCLUSIVE MODE"))

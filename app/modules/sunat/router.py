@@ -4,9 +4,10 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.modules.measurement_logs.service import finish_open_boleta_log_by_shipment
-from app.modules.shipments.service import get_shipment_by_code
+from app.modules.shipments.service import get_shipment, get_shipment_by_code
+from app.modules.sunat import repository
 from app.modules.sunat.exceptions import LycetClientError, SunatEmissionBlockedError
-from app.modules.sunat.pdf_service import generate_mock_receipt_pdf
+from app.modules.sunat.pdf_service import generate_electronic_receipt_pdf, generate_mock_receipt_pdf
 from app.modules.sunat.schema import ReceiptFromShipmentRequest, ReceiptResponse
 from app.modules.sunat.service import (
     generate_beta_pdf_from_shipment,
@@ -95,4 +96,22 @@ def download_mock_pdf_endpoint(serie: str, numero: str, db: Session = Depends(ge
         content=pdf_bytes,
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/boletas/{serie}/{numero}/pdf")
+def download_receipt_pdf_endpoint(serie: str, numero: str, db: Session = Depends(get_db)) -> Response:
+    receipt = repository.get_receipt_by_series_number(db, serie, numero)
+    if receipt is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Receipt not found")
+    shipment = get_shipment(db, receipt.shipment_id)
+    if shipment is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shipment not found")
+    pdf_bytes = generate_electronic_receipt_pdf(receipt, shipment)
+    finish_open_boleta_log_by_shipment(db, encomienda_id=shipment.id)
+    filename = f"boleta_{receipt.series}_{receipt.number}.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
     )

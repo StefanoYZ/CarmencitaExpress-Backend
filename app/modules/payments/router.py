@@ -21,19 +21,12 @@ router = APIRouter(prefix="/payments", tags=["Payments"])
 
 @router.get("/public-key")
 def get_public_key(db: Session = Depends(get_db)):
-    if not mercadopago_flow_enabled(db):
-        raise HTTPException(status_code=409, detail="El flujo externo de Mercado Pago esta desactivado.")
     if not MERCADOPAGO_PUBLIC_KEY:
         raise HTTPException(
             status_code=503,
             detail="MERCADOPAGO_PUBLIC_KEY no esta configurado.",
         )
     return {"publicKey": MERCADOPAGO_PUBLIC_KEY}
-
-
-@router.get("/mode")
-def get_payment_mode(db: Session = Depends(get_db)) -> dict[str, bool]:
-    return {"mercadopago_enabled": mercadopago_flow_enabled(db)}
 
 
 @router.post("/process-payment")

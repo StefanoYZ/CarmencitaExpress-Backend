@@ -8,7 +8,6 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.platypus import Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
-from app.modules.quotes.schema import QuoteResponse
 from app.modules.shipments.model import Shipment
 from app.modules.sunat.model import ElectronicReceipt
 from app.modules.sunat.schema import MockReceiptRecord
@@ -25,9 +24,6 @@ LOGO_PATH = Path(__file__).resolve().parents[2] / "assets" / "logo.png"
 def generate_electronic_receipt_pdf(
     receipt: ElectronicReceipt,
     shipment: Shipment,
-    quote: QuoteResponse,
-    *,
-    is_mock: bool = False,
 ) -> bytes:
     buffer = BytesIO()
     doc = SimpleDocTemplate(
@@ -80,12 +76,7 @@ def generate_electronic_receipt_pdf(
         [
             [Paragraph("BOLETA DE VENTA ELECTRONICA", table_header)],
             [Paragraph(f"<font size='15'><b>{receipt.series}-{receipt.number}</b></font>", body)],
-            [Paragraph(
-                "DOCUMENTO DE PRUEBA - SIN VALOR TRIBUTARIO"
-                if is_mock
-                else "RUC 20161515648 - ENTORNO SUNAT BETA",
-                small,
-            )],
+            [Paragraph("RUC 20161515648 - ENTORNO SUNAT BETA", small)],
         ],
         colWidths=[72 * mm],
     )
@@ -106,21 +97,6 @@ def generate_electronic_receipt_pdf(
     header.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE")]))
     story.extend([header, Spacer(1, 8 * mm)])
 
-    if is_mock:
-        warning = Table(
-            [[Paragraph("BOLETA DE PRUEBA - NO FUE ENVIADA A SUNAT", body)]],
-            colWidths=[166 * mm],
-        )
-        warning.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#FFF3CD")),
-            ("TEXTCOLOR", (0, 0), (-1, -1), colors.HexColor("#7A4D00")),
-            ("BOX", (0, 0), (-1, -1), 0.6, colors.HexColor("#E0A800")),
-            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-            ("TOPPADDING", (0, 0), (-1, -1), 7),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
-        ]))
-        story.extend([warning, Spacer(1, 5 * mm)])
-
     emitter = Paragraph(
         "<b>CARMENCITA EXPRESS CARGO</b><br/>"
         "Av. America Sur 257, Trujillo 13006<br/>"
@@ -129,8 +105,7 @@ def generate_electronic_receipt_pdf(
     )
     receipt_meta = Paragraph(
         f"<b>Fecha de emision:</b> {receipt.issue_date}<br/>"
-        f"<b>Moneda:</b> {receipt.currency}<br/>"
-        f"<b>Estado SUNAT:</b> {receipt.status}",
+        f"<b>Moneda:</b> {receipt.currency}",
         body,
     )
     meta_table = Table([[emitter, receipt_meta]], colWidths=[100 * mm, 66 * mm])
@@ -170,7 +145,7 @@ def generate_electronic_receipt_pdf(
             Paragraph(_escape(shipment.description), body),
             Paragraph(f"{_escape(shipment.origin)} - {_escape(shipment.destination)}", body),
             "1",
-            f"S/ {quote.subtotal:.2f}",
+            f"S/ {receipt.subtotal:.2f}",
         ],
     ]
     detail_table = Table(detail_data, colWidths=[66 * mm, 55 * mm, 16 * mm, 29 * mm])
@@ -194,9 +169,9 @@ def generate_electronic_receipt_pdf(
 
     totals = Table(
         [
-            ["Subtotal", f"S/ {quote.subtotal:.2f}"],
-            ["IGV (18%)", f"S/ {quote.igv:.2f}"],
-            ["TOTAL", f"S/ {quote.total:.2f}"],
+            ["Subtotal", f"S/ {receipt.subtotal:.2f}"],
+            ["IGV (18%)", f"S/ {receipt.igv:.2f}"],
+            ["TOTAL", f"S/ {receipt.total:.2f}"],
         ],
         colWidths=[38 * mm, 30 * mm],
         hAlign="RIGHT",
@@ -222,6 +197,23 @@ def generate_electronic_receipt_pdf(
     doc.build(story)
     buffer.seek(0)
     return buffer.read()
+
+
+def generate_mock_receipt_pdf(record: MockReceiptRecord) -> bytes:
+    receipt = SimpleNamespace(
+        series=record.series,
+        number=record.number,
+        issue_date=record.issue_date,
+        currency=record.quote.get("currency", "PEN"),
+        status="ACEPTADO",
+        subtotal=record.quote["subtotal"],
+        igv=record.quote["igv"],
+        total=record.quote["total"],
+    )
+    return generate_electronic_receipt_pdf(
+        receipt,
+        SimpleNamespace(**record.shipment),
+    )
 
 
 def _information_table(rows: list[list[str]], style: ParagraphStyle) -> Table:
@@ -251,22 +243,3 @@ def _escape(value) -> str:
         .replace("<", "&lt;")
         .replace(">", "&gt;")
     )
-
-
-def generate_mock_receipt_pdf(record: MockReceiptRecord) -> bytes:
-    receipt = SimpleNamespace(
-        series=record.series,
-        number=record.number,
-        issue_date=record.issue_date,
-        currency=record.quote.get("currency", "PEN"),
-        status="ACEPTADO_MOCK",
-    )
-    shipment = SimpleNamespace(**record.shipment)
-    quote = SimpleNamespace(**record.quote)
-    return generate_electronic_receipt_pdf(receipt, shipment, quote, is_mock=True)
-
-
-def _recipient_document(shipment: dict) -> str:
-    document_type = shipment.get("recipient_document_type") or ""
-    document_number = shipment.get("recipient_document_number") or ""
-    return f"{document_type} {document_number}".strip()
