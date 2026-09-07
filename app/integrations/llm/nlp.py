@@ -451,6 +451,8 @@ def detectar_intencion_llm(mensaje: str, contexto: dict | None = None) -> str | 
     except Exception as exc:
         logger.warning("No se pudo clasificar intención con LLM: %s", exc)
         return None
+    if not raw:
+        return None
     raw = raw.split()[0].strip("`'\".,:;")
     return raw if raw in _INTENTOS_VALIDOS else None
 
