@@ -50,7 +50,7 @@ class Settings(BaseSettings):
 
     # Asistente Virtual / LLM — Groq
     groq_api_key: Optional[str] = Field(default=None, alias="GROQ_API_KEY")
-    groq_model: str = Field(default="llama-3.1-8b-instant", alias="GROQ_MODEL")
+    groq_model: str = Field(default="llama-3.3-70b-versatile", alias="GROQ_MODEL")
     assistant_llm_enabled: bool = Field(default=False, alias="ASSISTANT_LLM_ENABLED")
 
     # Búsqueda web (recojo externo: sedes de agencias). Provider por defecto: Serper

@@ -5,6 +5,7 @@ nunca se exponga en la respuesta del chat.
 """
 from app.core.config import settings
 from app.integrations.llm import client as llm_client
+from app.integrations.llm import nlp
 from app.modules.asistente import service
 from app.modules.asistente.schema import ChatRequest
 
@@ -34,3 +35,10 @@ def test_respuesta_chat_no_expone_api_key(db_session, monkeypatch):
     )
     assert sentinel not in resp.respuesta
     assert sentinel not in str(resp.model_dump())
+
+
+def test_empty_llm_intent_response_uses_rule_fallback(monkeypatch):
+    monkeypatch.setattr(nlp, "_llm_enabled", lambda: True)
+    monkeypatch.setattr(nlp, "_call_llm", lambda prompt: "")
+
+    assert nlp.detectar_intencion_llm("consulta sin intención clara") is None
