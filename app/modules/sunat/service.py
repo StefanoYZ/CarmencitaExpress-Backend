@@ -161,18 +161,14 @@ def issue_receipt_from_shipment(db: Session, shipment_id: int, confirm_payment: 
 
     quote = calculate_quote_for_shipment(shipment)
     use_lycet = lycet_flow_enabled(db) and settings.sunat_env == "beta"
-
-    if use_lycet:
-        existing = repository.get_receipt_by_shipment(db, shipment_id)
-        if existing is not None:
-            return _receipt_response(existing, shipment.shipment_code)
-        number = repository.get_next_receipt_number(db, MOCK_RECEIPT_SERIES)
-    else:
-        number = _next_receipt_number()
+    existing = repository.get_receipt_by_shipment(db, shipment_id)
+    if existing is not None:
+        return _receipt_response(existing, shipment.shipment_code)
+    number = repository.get_next_receipt_number(db, MOCK_RECEIPT_SERIES)
     payload = build_receipt_payload(shipment, quote, number)
 
     if not use_lycet:
-        return _issue_mock_receipt(shipment, quote, payload, number)
+        return _issue_mock_receipt(db, shipment, quote, payload, number)
 
     if use_lycet:
         client = LycetClient()
@@ -224,7 +220,7 @@ def issue_receipt_from_shipment(db: Session, shipment_id: int, confirm_payment: 
 
 
 def generate_beta_pdf_from_shipment(db: Session, shipment_id: int, confirm_payment: bool = True) -> tuple[str, bytes]:
-    shipment, quote, _payload = _build_beta_payload_from_shipment(db, shipment_id, confirm_payment)
+    shipment, _quote, _payload = _build_beta_payload_from_shipment(db, shipment_id, confirm_payment)
     receipt = repository.get_receipt_by_shipment(db, shipment_id)
     if receipt is None:
         issue_receipt_from_shipment(db, shipment_id, confirm_payment)
@@ -232,7 +228,7 @@ def generate_beta_pdf_from_shipment(db: Session, shipment_id: int, confirm_payme
     if receipt is None:
         raise LycetClientError("Lycet no genero un comprobante persistible")
 
-    pdf_bytes = generate_electronic_receipt_pdf(receipt, shipment, quote)
+    pdf_bytes = generate_electronic_receipt_pdf(receipt, shipment)
     filename = f"boleta_{receipt.series}_{receipt.number}.pdf"
     return filename, pdf_bytes
 
@@ -281,6 +277,7 @@ def _build_beta_payload_from_shipment(
 
 
 def _issue_mock_receipt(
+    db: Session,
     shipment: Shipment,
     quote: QuoteResponse,
     payload: dict[str, Any],
@@ -294,39 +291,28 @@ def _issue_mock_receipt(
         "payload": payload,
     }
 
-    record = MockReceiptRecord(
-        serie=MOCK_RECEIPT_SERIES,
-        numero=number,
-        codigo_encomienda=shipment.shipment_code,
-        encomienda=_shipment_to_dict(shipment),
-        cotizacion=quote.model_dump(),
-        fecha_emision=issue_date,
-        hash=mock_hash,
-        raw_response=raw_response,
-    )
-    _mock_receipts_store[(MOCK_RECEIPT_SERIES, number)] = record
-
-    return ReceiptResponse(
-        success=True,
-        ambiente="mock",
-        estado="ACEPTADO_MOCK",
-        serie=MOCK_RECEIPT_SERIES,
-        numero=number,
-        fecha_emision=issue_date,
-        codigo_encomienda=shipment.shipment_code,
-        total=quote.total,
+    receipt = repository.create_receipt(
+        db,
+        shipment_id=shipment.id,
+        environment="mock",
+        status="ACEPTADO_MOCK",
+        series=MOCK_RECEIPT_SERIES,
+        number=number,
+        issue_date=issue_date,
         subtotal=quote.subtotal,
         igv=quote.igv,
-        moneda=quote.currency,
-        mensaje="Boleta simulada generada correctamente. Documento sin valor tributario.",
+        total=quote.total,
+        currency=quote.currency,
         hash=mock_hash,
-        pdf_url=f"{settings.api_prefix}/sunat/boletas/mock/{MOCK_RECEIPT_SERIES}/{number}/pdf",
-        xml_url=None,
-        cdr=None,
-        cdr_code=None,
-        cdr_description=None,
         cdr_notes=[],
+        request_payload=payload,
         raw_response=raw_response,
+    )
+    link_boleta_log_to_receipt(db, encomienda_id=shipment.id, boleta_id=receipt.id)
+    return _receipt_response(
+        receipt,
+        shipment.shipment_code,
+        message="Boleta generada correctamente.",
     )
 
 
@@ -413,7 +399,7 @@ def _receipt_response(
     message: str = "Boleta electronica disponible.",
 ) -> ReceiptResponse:
     return ReceiptResponse(
-        success=receipt.status == "ACEPTADO",
+        success=receipt.status in {"ACEPTADO", "ACEPTADO_MOCK"},
         ambiente=receipt.environment,
         estado=receipt.status,
         serie=receipt.series,
@@ -426,6 +412,7 @@ def _receipt_response(
         moneda=receipt.currency,
         mensaje=message,
         hash=receipt.hash,
+        pdf_url=f"{settings.api_prefix}/sunat/boletas/{receipt.series}/{receipt.number}/pdf",
         xml=receipt.signed_xml,
         cdr=receipt.cdr_zip,
         cdr_code=receipt.cdr_code,

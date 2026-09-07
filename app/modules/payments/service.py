@@ -139,9 +139,16 @@ SIMULATION_SCENARIOS = {
 
 
 def simulate_payment(data: dict, payment_method_id: str = "visa") -> dict:
-    scenario = str(data.get("simulation_scenario") or "APRO").strip().upper()
+    payer = data.get("payer") if isinstance(data.get("payer"), dict) else {}
+    scenario = str(
+        data.get("simulation_scenario")
+        or payer.get("first_name")
+        or payer.get("firstName")
+        or data.get("cardholderName")
+        or "OTHE"
+    ).strip().upper().split()[0]
     if scenario not in SIMULATION_SCENARIOS:
-        raise ValueError("El escenario de simulacion seleccionado no es valido.")
+        scenario = "OTHE"
     status, status_detail = SIMULATION_SCENARIOS[scenario]
     payment = {
         "id": None,
