@@ -105,8 +105,7 @@ def generate_electronic_receipt_pdf(
     )
     receipt_meta = Paragraph(
         f"<b>Fecha de emision:</b> {receipt.issue_date}<br/>"
-        f"<b>Moneda:</b> {receipt.currency}<br/>"
-        f"<b>Estado SUNAT:</b> {'ACEPTADO' if receipt.status == 'ACEPTADO_MOCK' else receipt.status}",
+        f"<b>Moneda:</b> {receipt.currency}",
         body,
     )
     meta_table = Table([[emitter, receipt_meta]], colWidths=[100 * mm, 66 * mm])
