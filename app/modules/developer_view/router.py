@@ -149,8 +149,7 @@ def set_optimization_test_mode_endpoint(
     payload: OptimizationTestModeUpdate,
     db: Session = Depends(get_db),
 ) -> OptimizationTestModeStatus:
-    # ON: genera paquetes de prueba (el escenario de optimizacion los usara). Con
-    # count=None el backend elige cantidad y semilla al azar -> lote distinto cada vez.
+    # ON: carga el lote exacto de 25 paquetes predeterminados.
     # OFF: los borra (el escenario vuelve a las encomiendas reales de la web).
     if payload.active:
         count = payload.count if payload.count and payload.count > 0 else None

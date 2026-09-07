@@ -56,7 +56,7 @@ class OptimizationTestModeStatus(BaseModel):
 
 class OptimizationTestModeUpdate(BaseModel):
     active: bool
-    # count opcional: si no se envia, el backend elige una cantidad al azar.
+    # count opcional: si no se envia, el backend carga los 25 predeterminados.
     count: int | None = None
 
 
