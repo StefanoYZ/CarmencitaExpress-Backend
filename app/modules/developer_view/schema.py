@@ -58,3 +58,12 @@ class OptimizationTestModeUpdate(BaseModel):
     active: bool
     # count opcional: si no se envia, el backend elige una cantidad al azar.
     count: int | None = None
+
+
+class IntegrationSettingsResponse(BaseModel):
+    mercadopago_enabled: bool
+    lycet_enabled: bool
+
+
+class IntegrationSettingsUpdate(IntegrationSettingsResponse):
+    pass

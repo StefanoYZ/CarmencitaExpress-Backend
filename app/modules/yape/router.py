@@ -2,6 +2,7 @@ from fastapi import APIRouter, Body, Depends, Header, HTTPException
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.modules.integration_settings.service import mercadopago_flow_enabled
 from app.modules.measurement_logs.service import ensure_boleta_log_after_payment, finish_service_phase
 from app.modules.charge_logs.service import (
     FAILED_RESULT,
@@ -12,7 +13,7 @@ from app.modules.charge_logs.service import (
     register_charge_log,
     start_charge_measurement,
 )
-from .service import procesar_pago_yape
+from .service import procesar_pago_yape, simular_pago_yape
 
 router = APIRouter(prefix="/yape", tags=["Yape"])
 
@@ -29,7 +30,7 @@ def process_yape_payment(
     )
 
     try:
-        result = procesar_pago_yape(data)
+        result = procesar_pago_yape(data) if mercadopago_flow_enabled(db) else simular_pago_yape(data)
     except Exception as error:
         register_charge_log(
             db,

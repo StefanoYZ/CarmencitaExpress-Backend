@@ -2,8 +2,9 @@ from fastapi import APIRouter, Body, Depends, Header, HTTPException
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.modules.payments.service import PaymentGatewayError, process_payment
+from app.modules.payments.service import PaymentGatewayError, process_payment, simulate_payment
 from app.core.config import MERCADOPAGO_PUBLIC_KEY
+from app.modules.integration_settings.service import mercadopago_flow_enabled
 from app.modules.measurement_logs.service import ensure_boleta_log_after_payment, finish_service_phase
 from app.modules.charge_logs.service import (
     CARD_MODALITY,
@@ -19,13 +20,20 @@ router = APIRouter(prefix="/payments", tags=["Payments"])
 
 
 @router.get("/public-key")
-def get_public_key():
+def get_public_key(db: Session = Depends(get_db)):
+    if not mercadopago_flow_enabled(db):
+        raise HTTPException(status_code=409, detail="El flujo externo de Mercado Pago esta desactivado.")
     if not MERCADOPAGO_PUBLIC_KEY:
         raise HTTPException(
             status_code=503,
             detail="MERCADOPAGO_PUBLIC_KEY no esta configurado.",
         )
     return {"publicKey": MERCADOPAGO_PUBLIC_KEY}
+
+
+@router.get("/mode")
+def get_payment_mode(db: Session = Depends(get_db)) -> dict[str, bool]:
+    return {"mercadopago_enabled": mercadopago_flow_enabled(db)}
 
 
 @router.post("/process-payment")
@@ -41,7 +49,7 @@ def create_payment(
     )
 
     try:
-        result = process_payment(data)
+        result = process_payment(data) if mercadopago_flow_enabled(db) else simulate_payment(data)
     except ValueError as error:
         register_charge_log(
             db,

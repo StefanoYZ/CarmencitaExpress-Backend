@@ -1,5 +1,6 @@
 from io import BytesIO
 from pathlib import Path
+from types import SimpleNamespace
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
@@ -25,6 +26,8 @@ def generate_electronic_receipt_pdf(
     receipt: ElectronicReceipt,
     shipment: Shipment,
     quote: QuoteResponse,
+    *,
+    is_mock: bool = False,
 ) -> bytes:
     buffer = BytesIO()
     doc = SimpleDocTemplate(
@@ -77,7 +80,12 @@ def generate_electronic_receipt_pdf(
         [
             [Paragraph("BOLETA DE VENTA ELECTRONICA", table_header)],
             [Paragraph(f"<font size='15'><b>{receipt.series}-{receipt.number}</b></font>", body)],
-            [Paragraph("RUC 20161515648 - ENTORNO SUNAT BETA", small)],
+            [Paragraph(
+                "DOCUMENTO DE PRUEBA - SIN VALOR TRIBUTARIO"
+                if is_mock
+                else "RUC 20161515648 - ENTORNO SUNAT BETA",
+                small,
+            )],
         ],
         colWidths=[72 * mm],
     )
@@ -97,6 +105,21 @@ def generate_electronic_receipt_pdf(
     header = Table([[logo, document_box]], colWidths=[94 * mm, 72 * mm])
     header.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE")]))
     story.extend([header, Spacer(1, 8 * mm)])
+
+    if is_mock:
+        warning = Table(
+            [[Paragraph("BOLETA DE PRUEBA - NO FUE ENVIADA A SUNAT", body)]],
+            colWidths=[166 * mm],
+        )
+        warning.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#FFF3CD")),
+            ("TEXTCOLOR", (0, 0), (-1, -1), colors.HexColor("#7A4D00")),
+            ("BOX", (0, 0), (-1, -1), 0.6, colors.HexColor("#E0A800")),
+            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+            ("TOPPADDING", (0, 0), (-1, -1), 7),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
+        ]))
+        story.extend([warning, Spacer(1, 5 * mm)])
 
     emitter = Paragraph(
         "<b>CARMENCITA EXPRESS CARGO</b><br/>"
@@ -231,67 +254,16 @@ def _escape(value) -> str:
 
 
 def generate_mock_receipt_pdf(record: MockReceiptRecord) -> bytes:
-    buffer = BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=40, leftMargin=40, topMargin=40, bottomMargin=40)
-    styles = getSampleStyleSheet()
-    story = []
-
-    shipment = record.shipment
-    quote = record.quote
-
-    story.append(Paragraph("BOLETA DE VENTA ELECTRONICA - MOCK", styles["Title"]))
-    story.append(Paragraph("BOLETA DE PRUEBA - SIN VALOR TRIBUTARIO", styles["Heading2"]))
-    story.append(Spacer(1, 12))
-    story.append(Paragraph("Carmencita Express Cargo S.A.C. (modo desarrollo)", styles["Normal"]))
-    story.append(Paragraph("RUC no utilizado en modo mock", styles["Normal"]))
-    story.append(Spacer(1, 16))
-
-    data = [
-        ["Codigo de encomienda", record.shipment_code],
-        ["Serie y numero", f"{record.series}-{record.number}"],
-        ["Fecha", record.issue_date],
-        ["Remitente", shipment["sender_name"]],
-        ["Documento remitente", f"{shipment['sender_document_type']} {shipment['sender_document_number']}"],
-        ["Direccion remitente", shipment.get("sender_address") or ""],
-        ["Telefono remitente", shipment.get("sender_phone") or ""],
-        ["Destinatario", shipment["recipient_name"]],
-        ["Documento destinatario", _recipient_document(shipment)],
-        ["Destino", shipment["destination"]],
-        ["Servicio", shipment["description"]],
-        ["Ruta", f"{shipment['origin']} -> {shipment['destination']}"],
-        ["Peso", f"{shipment['weight_kg']} kg"],
-        ["Dimensiones", f"{shipment['length_cm']} x {shipment['width_cm']} x {shipment['height_cm']} cm"],
-        ["Fragilidad", shipment["fragility"]],
-        ["Subtotal", f"S/ {quote['subtotal']:.2f}"],
-        ["IGV", f"S/ {quote['igv']:.2f}"],
-        ["Total", f"S/ {quote['total']:.2f}"],
-    ]
-
-    table = Table(data, colWidths=[160, 320])
-    table.setStyle(
-        TableStyle(
-            [
-                ("BACKGROUND", (0, 0), (0, -1), colors.lightgrey),
-                ("BOX", (0, 0), (-1, -1), 0.5, colors.grey),
-                ("INNERGRID", (0, 0), (-1, -1), 0.25, colors.grey),
-                ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
-                ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("PADDING", (0, 0), (-1, -1), 7),
-            ]
-        )
+    receipt = SimpleNamespace(
+        series=record.series,
+        number=record.number,
+        issue_date=record.issue_date,
+        currency=record.quote.get("currency", "PEN"),
+        status="ACEPTADO_MOCK",
     )
-    story.append(table)
-    story.append(Spacer(1, 18))
-    story.append(
-        Paragraph(
-            "Documento generado para pruebas de desarrollo. No representa un comprobante valido ante SUNAT.",
-            styles["Italic"],
-        )
-    )
-
-    doc.build(story)
-    buffer.seek(0)
-    return buffer.read()
+    shipment = SimpleNamespace(**record.shipment)
+    quote = SimpleNamespace(**record.quote)
+    return generate_electronic_receipt_pdf(receipt, shipment, quote, is_mock=True)
 
 
 def _recipient_document(shipment: dict) -> str:

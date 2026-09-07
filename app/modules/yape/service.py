@@ -1,6 +1,7 @@
 import mercadopago
 
 from app.core.config import MERCADOPAGO_ACCESS_TOKEN
+from app.modules.payments.service import simulate_payment
 
 
 def _get_sdk():
@@ -37,4 +38,16 @@ def procesar_pago_yape(data: dict):
         "id": payment.get("id"),
         "payment_method_id": payment.get("payment_method_id"),
         "data": payment
+    }
+
+
+def simular_pago_yape(data: dict) -> dict:
+    result = simulate_payment(data, payment_method_id="yape")
+    return {
+        "status": result["payment_status"],
+        "status_detail": result["status_detail"],
+        "id": None,
+        "payment_method_id": "yape",
+        "simulation": True,
+        "data": result["response"],
     }
