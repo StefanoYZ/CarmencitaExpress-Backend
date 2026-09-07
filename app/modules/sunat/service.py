@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.core.business_time import business_now
 from app.core.config import settings
 from app.modules.measurement_logs.service import link_boleta_log_to_receipt
+from app.modules.integration_settings.service import lycet_flow_enabled
 from app.modules.quotes.schema import QuoteResponse
 from app.modules.quotes.service import calculate_quote_for_shipment
 from app.modules.shipments.service import get_shipment
@@ -150,9 +151,6 @@ def build_receipt_payload(
 
 
 def issue_receipt_from_shipment(db: Session, shipment_id: int, confirm_payment: bool = True) -> ReceiptResponse:
-    if settings.production_emission_blocked:
-        raise SunatEmissionBlockedError("Real emission is blocked by configuration")
-
     if not confirm_payment:
         raise ValueError("Payment must be confirmed before issuing the receipt")
 
@@ -162,7 +160,9 @@ def issue_receipt_from_shipment(db: Session, shipment_id: int, confirm_payment: 
     _validate_shipment_can_emit_receipt(shipment)
 
     quote = calculate_quote_for_shipment(shipment)
-    if settings.sunat_env == "beta":
+    use_lycet = lycet_flow_enabled(db) and settings.sunat_env == "beta"
+
+    if use_lycet:
         existing = repository.get_receipt_by_shipment(db, shipment_id)
         if existing is not None:
             return _receipt_response(existing, shipment.shipment_code)
@@ -171,10 +171,10 @@ def issue_receipt_from_shipment(db: Session, shipment_id: int, confirm_payment: 
         number = _next_receipt_number()
     payload = build_receipt_payload(shipment, quote, number)
 
-    if settings.sunat_env == "mock":
+    if not use_lycet:
         return _issue_mock_receipt(shipment, quote, payload, number)
 
-    if settings.sunat_env == "beta":
+    if use_lycet:
         client = LycetClient()
         result = client.emitir_boleta(payload)
         raw_response = result.get("raw_response", result)
@@ -220,7 +220,7 @@ def issue_receipt_from_shipment(db: Session, shipment_id: int, confirm_payment: 
             message=result.get("mensaje", "Boleta enviada a Lycet beta."),
         )
 
-    raise SunatEmissionBlockedError("SUNAT_ENV=production is blocked for this stage")
+    raise SunatEmissionBlockedError("No se pudo determinar el flujo de emision")
 
 
 def generate_beta_pdf_from_shipment(db: Session, shipment_id: int, confirm_payment: bool = True) -> tuple[str, bytes]:

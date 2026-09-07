@@ -4,6 +4,8 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.dependencies import require_permission
 from app.modules.developer_view.schema import (
+    IntegrationSettingsResponse,
+    IntegrationSettingsUpdate,
     OptimizationTestModeStatus,
     OptimizationTestModeUpdate,
     RowCreateRequest,
@@ -13,6 +15,10 @@ from app.modules.developer_view.schema import (
     TableDataResponse,
     TableInfo,
     TableSchemaResponse,
+)
+from app.modules.integration_settings.service import (
+    get_integration_settings,
+    update_integration_settings,
 )
 from app.modules.developer_view.service import (
     DeveloperViewError,
@@ -38,6 +44,35 @@ router = APIRouter(
     tags=["Developer View"],
     dependencies=[Depends(require_permission("developer.read"))],
 )
+
+
+@router.get("/integraciones", response_model=IntegrationSettingsResponse)
+def get_integrations_endpoint(db: Session = Depends(get_db)) -> IntegrationSettingsResponse:
+    config = get_integration_settings(db)
+    return IntegrationSettingsResponse(
+        mercadopago_enabled=config.mercadopago_enabled,
+        lycet_enabled=config.lycet_enabled,
+    )
+
+
+@router.put(
+    "/integraciones",
+    response_model=IntegrationSettingsResponse,
+    dependencies=[Depends(require_permission("developer.write"))],
+)
+def update_integrations_endpoint(
+    payload: IntegrationSettingsUpdate,
+    db: Session = Depends(get_db),
+) -> IntegrationSettingsResponse:
+    config = update_integration_settings(
+        db,
+        mercadopago_enabled=payload.mercadopago_enabled,
+        lycet_enabled=payload.lycet_enabled,
+    )
+    return IntegrationSettingsResponse(
+        mercadopago_enabled=config.mercadopago_enabled,
+        lycet_enabled=config.lycet_enabled,
+    )
 
 
 @router.get("/tablas", response_model=list[TableInfo])

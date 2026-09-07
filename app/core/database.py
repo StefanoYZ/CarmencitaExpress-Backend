@@ -51,6 +51,7 @@ def create_db_tables(max_attempts: int = 5, retry_delay_seconds: int = 3) -> Non
     from app.modules.clients import model as clients_model  # noqa: F401
     from app.modules.charge_logs import model as charge_logs_model  # noqa: F401
     from app.modules.destinations import model as destinations_model  # noqa: F401
+    from app.modules.integration_settings import model as integration_settings_model  # noqa: F401
     from app.modules.measurement_logs import model as measurement_logs_model  # noqa: F401
     from app.modules.shipments import model as shipments_model  # noqa: F401
     from app.modules.sunat import model as sunat_model  # noqa: F401

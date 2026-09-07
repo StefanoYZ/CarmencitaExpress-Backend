@@ -57,16 +57,10 @@ def _build_payer(data: dict) -> dict:
         raise ValueError("El correo del titular es obligatorio.")
     if not identification_type or not identification_number:
         raise ValueError("El tipo y numero de documento del titular son obligatorios.")
-    if identification_type.upper() == "DNI" and (
-        len(identification_number) != 8 or not identification_number.isdigit()
-    ):
-        raise ValueError("El DNI del titular debe tener exactamente 8 digitos.")
-
     payer = {
         "email": email,
-        "entity_type": "individual",
         "identification": {
-            "type": identification_type.upper(),
+            "type": identification_type,
             "number": identification_number,
         },
     }
@@ -126,5 +120,43 @@ def process_payment(data: dict):
         "status_detail": payment.get("status_detail"),
         "id": payment.get("id"),
         "payment_method_id": payment.get("payment_method_id"),
+        "response": payment,
+    }
+
+
+SIMULATION_SCENARIOS = {
+    "APRO": ("approved", "accredited"),
+    "OTHE": ("rejected", "cc_rejected_other_reason"),
+    "CONT": ("pending", "pending_contingency"),
+    "CALL": ("rejected", "cc_rejected_call_for_authorize"),
+    "FUND": ("rejected", "cc_rejected_insufficient_amount"),
+    "SECU": ("rejected", "cc_rejected_bad_filled_security_code"),
+    "EXPI": ("rejected", "cc_rejected_bad_filled_date"),
+    "FORM": ("rejected", "cc_rejected_bad_filled_other"),
+    "CARD": ("rejected", "cc_rejected_bad_filled_card_number"),
+    "INST": ("rejected", "cc_rejected_bad_filled_installments"),
+}
+
+
+def simulate_payment(data: dict, payment_method_id: str = "visa") -> dict:
+    scenario = str(data.get("simulation_scenario") or "APRO").strip().upper()
+    if scenario not in SIMULATION_SCENARIOS:
+        raise ValueError("El escenario de simulacion seleccionado no es valido.")
+    status, status_detail = SIMULATION_SCENARIOS[scenario]
+    payment = {
+        "id": None,
+        "status": status,
+        "status_detail": status_detail,
+        "payment_method_id": payment_method_id,
+        "simulation": True,
+        "scenario": scenario,
+    }
+    return {
+        "api_status": 201,
+        "payment_status": status,
+        "status_detail": status_detail,
+        "id": None,
+        "payment_method_id": payment_method_id,
+        "simulation": True,
         "response": payment,
     }
