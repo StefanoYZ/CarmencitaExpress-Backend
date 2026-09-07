@@ -134,13 +134,12 @@ jobs:
             AUTO_CREATE_SCHEMA=false
             SUNAT_ENV=mock
             SUNAT_ALLOW_REAL_EMISSION=false
-            ASSISTANT_LLM_ENABLED=false
-          env_vars_update_strategy: overwrite
+          env_vars_update_strategy: merge
           secrets: |-
             DB_PASSWORD=carmencita-db-password:latest
             SECRET_KEY=carmencita-secret-key:latest
             DEFAULT_ADMIN_PASSWORD=carmencita-admin-password:latest
-          secrets_update_strategy: overwrite
+          secrets_update_strategy: merge
           flags: >-
             --service-account=${{ vars.GCP_RUNTIME_SERVICE_ACCOUNT }}
             --add-cloudsql-instances=${{ vars.GCP_PROJECT_ID }}:${{ vars.GCP_REGION }}:${{ vars.GCP_CLOUD_SQL_INSTANCE }}
