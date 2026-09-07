@@ -69,17 +69,14 @@ def list_registered_packages(db: Session, limit: int | None = None) -> list[Pack
         .order_by(Shipment.created_at.asc(), Shipment.id.asc())
         .all()
     )
-    del_dia = [
+    reales_del_dia = [
         shipment
         for shipment in shipments
-        if ensure_business_tz(shipment.created_at).date() == hoy
+        if not _is_test_shipment(shipment)
+        and ensure_business_tz(shipment.created_at).date() == hoy
     ]
-    # Modo prueba (switch de la Vista Developer): si existen paquetes de prueba de
-    # hoy se usan ESOS; si no, se usan las encomiendas reales registradas por la web.
-    de_prueba = [shipment for shipment in del_dia if _is_test_shipment(shipment)]
-    seleccion = de_prueba if de_prueba else [
-        shipment for shipment in del_dia if not _is_test_shipment(shipment)
-    ]
+    de_prueba = [shipment for shipment in shipments if _is_test_shipment(shipment)]
+    seleccion = de_prueba + reales_del_dia
     if limit is not None:
         seleccion = seleccion[:limit]
     return [_shipment_to_package(shipment) for shipment in seleccion]

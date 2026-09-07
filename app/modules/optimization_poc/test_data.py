@@ -1,10 +1,8 @@
 """Generacion y control de PAQUETES DE PRUEBA para la optimizacion 3D.
 
 El "modo prueba" de la optimizacion se considera ACTIVO cuando existen encomiendas
-de prueba registradas hoy (marcadas con el prefijo TEST_PACKAGE_MARKER en la
-descripcion). Cuando hay paquetes de prueba, el escenario de optimizacion los usa;
-cuando no, usa las encomiendas reales registradas por la web (ver
-`repository.list_registered_packages`).
+marcadas con el prefijo TEST_PACKAGE_MARKER. El escenario las conserva como lote
+base y agrega despues las encomiendas reales registradas hoy.
 
 Este modulo centraliza construir/sembrar/contar/borrar esos paquetes, de modo que
 lo usen por igual el switch de la Vista Developer y el script
@@ -12,12 +10,12 @@ lo usen por igual el switch de la Vista Developer y el script
 """
 from __future__ import annotations
 
-import secrets
+from collections import Counter
 from random import Random
 
 from sqlalchemy.orm import Session
 
-from app.core.business_time import business_now, business_today, ensure_business_tz
+from app.core.business_time import business_now
 from app.modules.measurement_logs.model import (
     LogCargaPaquete,
     LogEmisionBoleta,
@@ -34,11 +32,9 @@ _DEPENDENT_LOG_MODELS = (LogEmisionBoleta, LogServicioTransporte, LogCargaPaquet
 
 # Prefijo de descripcion que marca una encomienda como paquete de prueba.
 TEST_PACKAGE_MARKER = "[PRUEBA]"
-# Cuando no se indica una cantidad, se elige una AL AZAR en este rango, para que
-# cada activacion pruebe un lote de tamano distinto (tope 70 por la optimizacion).
-MIN_TEST_PACKAGE_COUNT = 20
-MAX_TEST_PACKAGE_COUNT = 60
-DEFAULT_TEST_PACKAGE_COUNT = 50
+DEFAULT_TEST_PACKAGE_COUNT = 25
+# Semilla del lote exacto mostrado en la vista de optimizacion.
+DEFAULT_TEST_PACKAGE_SEED = 28598
 
 ORIGEN = "TRUJILLO"
 _DESTINOS = [stop for stop in LOGISTIC_ROUTE if stop != ORIGEN]
@@ -111,6 +107,31 @@ def _test_packages_query(db: Session):
     return db.query(Shipment).filter(Shipment.description.like(f"{TEST_PACKAGE_MARKER}%"))
 
 
+def _physical_signature(shipment: Shipment) -> tuple:
+    return (
+        shipment.destination,
+        shipment.description,
+        shipment.content_type,
+        shipment.fragility,
+        float(shipment.length_cm),
+        float(shipment.width_cm),
+        float(shipment.height_cm),
+        float(shipment.weight_kg),
+    )
+
+
+def _is_default_test_batch(shipments: list[Shipment]) -> bool:
+    if len(shipments) != DEFAULT_TEST_PACKAGE_COUNT:
+        return False
+    expected = build_test_shipments(
+        n=DEFAULT_TEST_PACKAGE_COUNT,
+        seed=DEFAULT_TEST_PACKAGE_SEED,
+    )
+    return Counter(map(_physical_signature, shipments)) == Counter(
+        map(_physical_signature, expected)
+    )
+
+
 def clear_test_packages(db: Session) -> int:
     """Borra todas las encomiendas de prueba (y sus logs dependientes).
 
@@ -127,17 +148,12 @@ def clear_test_packages(db: Session) -> int:
 
 
 def count_test_packages_today(db: Session) -> int:
-    """Cuenta las encomiendas de prueba registradas HOY (dia de negocio)."""
-    hoy = business_today()
-    return sum(
-        1
-        for shipment in _test_packages_query(db).all()
-        if ensure_business_tz(shipment.created_at).date() == hoy
-    )
+    """Cuenta el lote base persistido usado por el modo prueba."""
+    return _test_packages_query(db).count()
 
 
 def test_mode_active(db: Session) -> bool:
-    """El modo prueba esta activo si existe al menos un paquete de prueba de hoy."""
+    """El modo prueba esta activo si existe al menos un paquete base."""
     return count_test_packages_today(db) > 0
 
 
@@ -146,18 +162,26 @@ def seed_test_packages(
     n: int | None = None,
     seed: int | None = None,
 ) -> int:
-    """Reemplaza los paquetes de prueba: borra los previos e inserta n nuevos.
+    """Conserva el lote exacto existente o crea uno nuevo.
 
-    - `n=None`: elige una cantidad AL AZAR entre MIN/MAX_TEST_PACKAGE_COUNT.
-    - `seed=None`: usa una semilla aleatoria (paquetes distintos en cada activacion).
+    - `n=None`: crea el lote base de 25 paquetes.
+    - `seed=None`: usa la semilla fija del lote mostrado en la interfaz.
 
     Devuelve la cantidad creada. Cada fila recibe un codigo valido y un id
     incremental (necesario para el siguiente codigo).
     """
-    if seed is None:
-        seed = secrets.randbelow(1_000_000)
-    if n is None:
-        n = Random(seed).randint(MIN_TEST_PACKAGE_COUNT, MAX_TEST_PACKAGE_COUNT)
+    use_default_batch = n is None and seed is None
+    if use_default_batch:
+        existing = _test_packages_query(db).all()
+        if _is_default_test_batch(existing):
+            return len(existing)
+        n = DEFAULT_TEST_PACKAGE_COUNT
+        seed = DEFAULT_TEST_PACKAGE_SEED
+    elif seed is None:
+        seed = DEFAULT_TEST_PACKAGE_SEED
+    elif n is None:
+        n = DEFAULT_TEST_PACKAGE_COUNT
+
     n = max(1, min(n, 70))
     clear_test_packages(db)
     paquetes = build_test_shipments(n=n, seed=seed)
