@@ -141,10 +141,10 @@ SIMULATION_SCENARIOS = {
 def simulate_payment(data: dict, payment_method_id: str = "visa") -> dict:
     payer = data.get("payer") if isinstance(data.get("payer"), dict) else {}
     scenario = str(
-        data.get("simulation_scenario")
+        data.get("cardholder_name")
+        or data.get("cardholderName")
         or payer.get("first_name")
         or payer.get("firstName")
-        or data.get("cardholderName")
         or "OTHE"
     ).strip().upper().split()[0]
     if scenario not in SIMULATION_SCENARIOS:
@@ -155,8 +155,6 @@ def simulate_payment(data: dict, payment_method_id: str = "visa") -> dict:
         "status": status,
         "status_detail": status_detail,
         "payment_method_id": payment_method_id,
-        "simulation": True,
-        "scenario": scenario,
     }
     return {
         "api_status": 201,
@@ -164,6 +162,5 @@ def simulate_payment(data: dict, payment_method_id: str = "visa") -> dict:
         "status_detail": status_detail,
         "id": None,
         "payment_method_id": payment_method_id,
-        "simulation": True,
         "response": payment,
     }

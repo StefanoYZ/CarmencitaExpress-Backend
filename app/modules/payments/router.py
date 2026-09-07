@@ -29,11 +29,6 @@ def get_public_key(db: Session = Depends(get_db)):
     return {"publicKey": MERCADOPAGO_PUBLIC_KEY}
 
 
-@router.get("/mode")
-def get_payment_mode(db: Session = Depends(get_db)) -> dict[str, bool]:
-    return {"mercadopago_enabled": mercadopago_flow_enabled(db)}
-
-
 @router.post("/process-payment")
 def create_payment(
     data: dict = Body(...),

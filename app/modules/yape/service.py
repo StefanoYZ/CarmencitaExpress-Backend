@@ -47,7 +47,7 @@ def simular_pago_yape(data: dict) -> dict:
         and str(data.get("otp") or "").strip() == "123456"
     )
     result = simulate_payment(
-        {"simulation_scenario": "APRO" if approved else "OTHE"},
+        {"cardholder_name": "APRO" if approved else "OTHE"},
         payment_method_id="yape",
     )
     return {
@@ -55,6 +55,5 @@ def simular_pago_yape(data: dict) -> dict:
         "status_detail": result["status_detail"],
         "id": None,
         "payment_method_id": "yape",
-        "simulation": True,
         "data": result["response"],
     }
