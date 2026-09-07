@@ -57,11 +57,16 @@ def _build_payer(data: dict) -> dict:
         raise ValueError("El correo del titular es obligatorio.")
     if not identification_type or not identification_number:
         raise ValueError("El tipo y numero de documento del titular son obligatorios.")
+    if identification_type.upper() == "DNI" and (
+        len(identification_number) != 8 or not identification_number.isdigit()
+    ):
+        raise ValueError("El DNI del titular debe tener exactamente 8 digitos.")
 
     payer = {
         "email": email,
+        "entity_type": "individual",
         "identification": {
-            "type": identification_type,
+            "type": identification_type.upper(),
             "number": identification_number,
         },
     }
