@@ -48,8 +48,10 @@ def get_db() -> Generator[Session, None, None]:
 def create_db_tables(max_attempts: int = 5, retry_delay_seconds: int = 3) -> None:
     # Crea tablas nuevas y sincroniza columnas faltantes en desarrollo.
     from app.modules.asistente import model as asistente_model  # noqa: F401
+    from app.modules.agencies import model as agencies_model  # noqa: F401
     from app.modules.clients import model as clients_model  # noqa: F401
     from app.modules.charge_logs import model as charge_logs_model  # noqa: F401
+    from app.modules.claims import model as claims_model  # noqa: F401
     from app.modules.destinations import model as destinations_model  # noqa: F401
     from app.modules.integration_settings import model as integration_settings_model  # noqa: F401
     from app.modules.measurement_logs import model as measurement_logs_model  # noqa: F401
@@ -120,6 +122,25 @@ def sync_development_schema() -> None:
                             f'WHERE "{timestamp_column}" IS NULL'
                         )
                     )
+
+        if engine.dialect.name == "postgresql":
+            # La sincronización de columnas no crea los índices ni las claves foráneas
+            # de tablas existentes. Completar la migración idempotente de agencias.
+            for table_name in ("internal_users", "encomiendas"):
+                if not inspector.has_table(table_name):
+                    continue
+                connection.execute(text(
+                    f'CREATE INDEX IF NOT EXISTS "ix_{table_name}_agency_id" '
+                    f'ON "{table_name}" (agency_id)'
+                ))
+                if not any(
+                    fk.get("referred_table") == "agencias" and fk.get("constrained_columns") == ["agency_id"]
+                    for fk in inspect(connection).get_foreign_keys(table_name)
+                ):
+                    connection.execute(text(
+                        f'ALTER TABLE "{table_name}" ADD CONSTRAINT "fk_{table_name}_agency_id" '
+                        'FOREIGN KEY (agency_id) REFERENCES agencias(id)'
+                    ))
 
 
 def database_is_ready() -> bool:

@@ -37,6 +37,7 @@ VERTICAL_ONLY_CONTENT_KEYWORDS = (
     "electrodomestico",
     "electrodomesticos",
 )
+PUBLIC_PRIVACY_NOTICE_VERSION = "2026-10-11"
 
 
 class ShipmentPayloadBase(BaseModel):
@@ -256,11 +257,28 @@ class ShipmentPayloadBase(BaseModel):
 
 
 class ShipmentCreate(ShipmentPayloadBase):
-    pass
+    # Internal registrations may retain the same evidence, but do not require it.
+    privacy_notice_accepted: bool | None = Field(default=None, alias="aviso_privacidad_aceptado")
+    privacy_notice_version: str | None = Field(default=None, alias="version_aviso_privacidad")
 
 
 class ShipmentPreRegistrationCreate(ShipmentPayloadBase):
-    pass
+    privacy_notice_accepted: bool = Field(alias="aviso_privacidad_aceptado")
+    privacy_notice_version: str = Field(alias="version_aviso_privacidad")
+
+    @field_validator("privacy_notice_accepted")
+    @classmethod
+    def require_privacy_notice_acceptance(cls, value: bool) -> bool:
+        if value is not True:
+            raise ValueError("Debe aceptar expresamente el aviso de privacidad")
+        return value
+
+    @field_validator("privacy_notice_version")
+    @classmethod
+    def require_current_privacy_notice(cls, value: str) -> str:
+        if value.strip() != PUBLIC_PRIVACY_NOTICE_VERSION:
+            raise ValueError("Debe aceptar la version vigente del aviso de privacidad")
+        return PUBLIC_PRIVACY_NOTICE_VERSION
 
 
 class ShipmentResponse(BaseModel):
@@ -299,6 +317,10 @@ class ShipmentResponse(BaseModel):
     delivery_receiver_document: str | None = Field(default=None, alias="dni_receptor_entrega")
     digital_signature_base64: str | None = Field(default=None, alias="firma_digital_base64")
     security_key: str | None = Field(default=None, alias="clave_seguridad")
+    agency_id: int | None = None
+    privacy_notice_version: str | None = Field(default=None, alias="version_aviso_privacidad")
+    privacy_accepted_at: datetime | None = Field(default=None, alias="fecha_aceptacion_aviso_privacidad")
+    privacy_channel: str | None = Field(default=None, alias="canal_aviso_privacidad")
     created_at: datetime = Field(alias="fecha_creacion")
     updated_at: datetime = Field(alias="fecha_actualizacion")
 
@@ -325,6 +347,11 @@ class ShipmentPreRegistrationResponse(BaseModel):
     status: str = Field(alias="estado")
     registration_origin: str = Field(alias="origen_registro")
     message: str = Field(alias="mensaje")
+
+
+class PrivacyNoticeResponse(BaseModel):
+    version: str
+    text: str
 
 
 class ConfirmPreRegistrationRequest(BaseModel):

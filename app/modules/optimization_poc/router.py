@@ -32,9 +32,9 @@ router = APIRouter(
 def get_packages(
     limit: int | None = Query(default=None, ge=1),
     db: Session = Depends(get_db),
-    _current_user=Depends(require_permission("optimization.read")),
+    current_user=Depends(require_permission("optimization.read")),
 ) -> list[Package]:
-    return list_registered_packages(db, limit=limit)
+    return list_registered_packages(db, limit=limit, agency_id=current_user.agency_id)
 
 
 @router.get("/trucks", response_model=list[Truck])
@@ -48,60 +48,60 @@ def get_trucks(
 def get_poc_scenario(
     limit: int | None = Query(default=None, ge=1),
     db: Session = Depends(get_db),
-    _current_user=Depends(require_permission("optimization.read")),
+    current_user=Depends(require_permission("optimization.read")),
 ) -> ScenarioResponse:
-    return get_scenario(limit=limit, db=db)
+    return get_scenario(limit=limit, db=db, agency_id=current_user.agency_id)
 
 
 @router.post("/first-fit/run", response_model=SimulationResponse)
 def run_first_fit_endpoint(
     payload: RunRequest,
     db: Session = Depends(get_db),
-    _current_user=Depends(require_permission("optimization.run")),
+    current_user=Depends(require_permission("optimization.run")),
 ) -> SimulationResponse:
-    return run_first_fit(payload, db=db)
+    return run_first_fit(payload, db=db, agency_id=current_user.agency_id, actor_user_id=current_user.id)
 
 
 @router.post("/minimax-maximin/run", response_model=SimulationResponse)
 def run_minimax_maximin_endpoint(
     payload: RunRequest,
     db: Session = Depends(get_db),
-    _current_user=Depends(require_permission("optimization.run")),
+    current_user=Depends(require_permission("optimization.run")),
 ) -> SimulationResponse:
-    return run_minimax_maximin(payload, db=db)
+    return run_minimax_maximin(payload, db=db, agency_id=current_user.agency_id, actor_user_id=current_user.id)
 
 
 @router.post("/best-fit/run", response_model=SimulationResponse)
 def run_best_fit_endpoint(
     payload: RunRequest,
     db: Session = Depends(get_db),
-    _current_user=Depends(require_permission("optimization.run")),
+    current_user=Depends(require_permission("optimization.run")),
 ) -> SimulationResponse:
-    return run_best_fit(payload, db=db)
+    return run_best_fit(payload, db=db, agency_id=current_user.agency_id, actor_user_id=current_user.id)
 
 
 @router.post("/worst-fit/run", response_model=SimulationResponse)
 def run_worst_fit_endpoint(
     payload: RunRequest,
     db: Session = Depends(get_db),
-    _current_user=Depends(require_permission("optimization.run")),
+    current_user=Depends(require_permission("optimization.run")),
 ) -> SimulationResponse:
-    return run_worst_fit(payload, db=db)
+    return run_worst_fit(payload, db=db, agency_id=current_user.agency_id, actor_user_id=current_user.id)
 
 
 @router.post("/best-fit-decreasing/run", response_model=SimulationResponse)
 def run_best_fit_decreasing_endpoint(
     payload: RunRequest,
     db: Session = Depends(get_db),
-    _current_user=Depends(require_permission("optimization.run")),
+    current_user=Depends(require_permission("optimization.run")),
 ) -> SimulationResponse:
-    return run_best_fit_decreasing(payload, db=db)
+    return run_best_fit_decreasing(payload, db=db, agency_id=current_user.agency_id, actor_user_id=current_user.id)
 
 
 @router.post("/backtracking/run", response_model=SimulationResponse)
 def run_backtracking_endpoint(
     payload: RunRequest,
     db: Session = Depends(get_db),
-    _current_user=Depends(require_permission("optimization.run")),
+    current_user=Depends(require_permission("optimization.run")),
 ) -> SimulationResponse:
-    return run_backtracking_logistic(payload, db=db)
+    return run_backtracking_logistic(payload, db=db, agency_id=current_user.agency_id, actor_user_id=current_user.id)

@@ -88,7 +88,9 @@ def test_pre_registro_confirma_crea_y_pide_metodo_pago(db_session):
         "largo_cm": 30,
         "ancho_cm": 20,
         "alto_cm": 15,
-        "fragilidad": "BAJA",
+            "fragilidad": "BAJA",
+            "aviso_privacidad_aceptado": True,
+            "version_aviso_privacidad": "2026-10-11",
     }
     resp = _chat(db_session, "sí", contexto={"datos_acumulados": datos})
     assert resp.accion_sugerida == "elegir_metodo_pago"
@@ -155,7 +157,9 @@ def test_preregistro_chat_paquete_que_debe_ir_parado(db_session):
         "largo_cm": "120",
         "ancho_cm": "50",
         "alto_cm": "75",
-        "fragilidad": "MEDIA",
+            "fragilidad": "MEDIA",
+            "aviso_privacidad_aceptado": True,
+            "version_aviso_privacidad": "2026-10-11",
     }
     shipment = _crear_preregistro_desde_chat(db_session, datos, "sess-test")
     assert shipment is not None

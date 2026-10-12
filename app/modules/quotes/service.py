@@ -55,15 +55,20 @@ def calculate_quote_for_shipment(shipment: Shipment) -> QuoteResponse:
     )
 
 
-def calculate_quote(db: Session, shipment_id: int) -> QuoteResponse | None:
+def calculate_quote(
+    db: Session, shipment_id: int, *, actor_user_id: int | None = None
+) -> QuoteResponse | None:
     shipment = get_shipment(db, shipment_id)
     if shipment is None:
         return None
     if shipment.status == CANCELED_STATUS:
         raise ValueError("No se puede cotizar una encomienda anulada")
     quote = calculate_quote_for_shipment(shipment)
-    start_service_phase(db, "registro", encomienda_id=shipment.id, timestamp_inicio=shipment.created_at)
-    mark_shipment_as_quoted(db, shipment)
+    start_service_phase(
+        db, "registro", encomienda_id=shipment.id, timestamp_inicio=shipment.created_at,
+        usuario_id=actor_user_id,
+    )
+    mark_shipment_as_quoted(db, shipment, actor_user_id=actor_user_id)
     return quote
 
 

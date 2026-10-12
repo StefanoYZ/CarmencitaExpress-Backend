@@ -45,9 +45,27 @@ def get_current_user(
     return user
 
 
-def get_current_active_user(current_user: InternalUser = Depends(get_current_user)) -> InternalUser:
+def get_current_active_user(
+    current_user: InternalUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> InternalUser:
     if not current_user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Inactive user")
+    business_roles = {"AGENCY_ADMIN", "SECRETARIA", "ESTIBA"}
+    active_roles = {role.name for role in current_user.roles if role.is_active}
+    if active_roles.intersection(business_roles) and current_user.agency_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="El personal operativo debe estar asignado a una agencia activa.",
+        )
+    if active_roles.intersection(business_roles):
+        from app.modules.agencies.model import Agency
+
+        agency = db.get(Agency, current_user.agency_id)
+        if agency is None:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="La agencia asignada no existe.")
+        if not agency.is_active and active_roles.intersection({"SECRETARIA", "ESTIBA"}):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="La agencia asignada está inactiva.")
     return current_user
 
 

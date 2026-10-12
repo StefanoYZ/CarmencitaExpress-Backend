@@ -11,6 +11,7 @@ Aislamiento: SQLite en memoria (conftest), SUNAT_ENV=mock, integraciones de pago
 mockeadas. Nomenclatura de casos: IT-xx (Integration Test).
 """
 from sqlalchemy.orm import Session
+import pytest
 
 from app.core.config import settings
 from app.modules.charge_logs.model import ChargeLog
@@ -23,6 +24,11 @@ from app.modules.shipments.constants import (
 )
 from app.modules.shipments.model import Shipment
 from app.modules.sunat.model import ElectronicReceipt
+
+
+@pytest.fixture(autouse=True)
+def authenticated_client(api_client, admin_headers):
+    api_client.headers.update(admin_headers)
 
 
 def test_it01_ciclo_cliente_externo_preregistro_confirmar_boleta(
@@ -201,6 +207,7 @@ def test_it04_anulacion_propaga_bloqueos_a_etiqueta_y_boleta(
 def test_it05_encomiendas_registradas_alimentan_optimizacion_estiba(
     api_client,
     estiba_headers,
+    secretaria_headers,
     valid_shipment_payload,
 ):
     """IT-05 · shipments + optimization + auth (RBAC).
@@ -220,7 +227,7 @@ def test_it05_encomiendas_registradas_alimentan_optimizacion_estiba(
             "alto_cm": 15 + index,
             "orientacion_base": "LARGO_ANCHO",
         }
-        created = api_client.post("/api/v1/encomiendas", json=payload)
+        created = api_client.post("/api/v1/encomiendas", headers=secretaria_headers, json=payload)
         assert created.status_code == 201, created.text
 
     run = api_client.post(

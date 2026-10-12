@@ -225,6 +225,7 @@ class UserResponse(BaseModel):
     username: str
     full_name: str
     is_active: bool
+    agency_id: int | None = None
     roles: list[str] = Field(default_factory=list)
     permissions: list[str] = Field(default_factory=list)
     created_at: datetime

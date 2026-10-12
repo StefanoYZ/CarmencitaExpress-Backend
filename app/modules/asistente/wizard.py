@@ -696,6 +696,8 @@ def _crear_preregistro_desde_chat(db: Session, datos: dict, session_id: str):
             "alto_cm": alto_cm,
             "fragilidad": fragilidad,
             "orientacion_base": orientacion_base,
+            "aviso_privacidad_aceptado": datos.get("aviso_privacidad_aceptado"),
+            "version_aviso_privacidad": datos.get("version_aviso_privacidad"),
         })
         shipment = shipments_service.create_pre_registration(db, payload)
         # CarmiBot no tiene interfaz visual para que el cliente elija la cara/base.

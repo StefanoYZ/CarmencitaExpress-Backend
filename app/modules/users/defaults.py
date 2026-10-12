@@ -98,6 +98,41 @@ BASE_PERMISSIONS = [
         "action": "update_status",
     },
     {
+        "code": "reclamos.read",
+        "name": "Consultar reclamos",
+        "description": "Consultar reclamos dentro del alcance de la agencia.",
+        "module": "reclamos",
+        "action": "read",
+    },
+    {
+        "code": "reclamos.create",
+        "name": "Registrar reclamos",
+        "description": "Registrar reclamos presenciales y atender casos asignados.",
+        "module": "reclamos",
+        "action": "create",
+    },
+    {
+        "code": "reclamos.update",
+        "name": "Actualizar reclamos",
+        "description": "Investigar reclamos y registrar actividades.",
+        "module": "reclamos",
+        "action": "update",
+    },
+    {
+        "code": "reclamos.resolve",
+        "name": "Resolver reclamos",
+        "description": "Registrar soluciones de reclamos.",
+        "module": "reclamos",
+        "action": "resolve",
+    },
+    {
+        "code": "reclamos.verify_payment",
+        "name": "Verificar pagos de reclamos",
+        "description": "Verificar comprobantes de soluciones monetarias.",
+        "module": "reclamos",
+        "action": "verify_payment",
+    },
+    {
         "code": "users.read",
         "name": "Leer usuarios",
         "description": "Consultar usuarios internos.",
@@ -168,6 +203,41 @@ BASE_PERMISSIONS = [
         "action": "write",
     },
     {
+        "code": "agencias.read",
+        "name": "Leer agencias",
+        "description": "Consultar agencias y su operacion contextual.",
+        "module": "agencias",
+        "action": "read",
+    },
+    {
+        "code": "agencias.write",
+        "name": "Crear agencias",
+        "description": "Crear agencias vinculadas a destinos activos.",
+        "module": "agencias",
+        "action": "write",
+    },
+    {
+        "code": "agencias.update",
+        "name": "Actualizar agencias",
+        "description": "Actualizar agencias y gestionar su personal contextual.",
+        "module": "agencias",
+        "action": "update",
+    },
+    {
+        "code": "agencias.change_status",
+        "name": "Cambiar estado de agencias",
+        "description": "Activar o desactivar agencias.",
+        "module": "agencias",
+        "action": "change_status",
+    },
+    {
+        "code": "agencias.assign_admin",
+        "name": "Asignar administrador de agencia",
+        "description": "Asignar o reemplazar administradores de agencia.",
+        "module": "agencias",
+        "action": "assign_admin",
+    },
+    {
         "code": "developer.read",
         "name": "Vista developer",
         "description": "Inspeccionar tablas del sistema en modo solo lectura y exportarlas.",
@@ -198,12 +268,40 @@ BASE_PERMISSIONS = [
 ]
 
 BASE_ROLE_PERMISSIONS = {
-    "ADMINISTRADOR": [
+    "ADMIN_GENERAL": [
         permission["code"]
         for permission in BASE_PERMISSIONS
         if not permission["code"].startswith(("optimization.", "developer."))
+        and permission["code"] not in {
+            "roles.write", "roles.update", "roles.assign_permissions", "permissions.write"
+        }
+    ],
+    "AGENCY_ADMIN": [
+        "agencias.read",
+        "agencias.update",
+        "reclamos.read",
+        "reclamos.create",
+        "reclamos.update",
+        "reclamos.resolve",
+        "reclamos.verify_payment",
+        "encomiendas.read",
+        "encomiendas.write",
+        "encomiendas.update",
+        "encomiendas.cancel",
+        "cotizaciones.calculate",
+        "cotizaciones.read",
+        "sunat.emit",
+        "sunat.read",
+        "sunat.download_pdf",
+        "etiquetas.generate",
+        "etiquetas.read",
+        "tracking.read",
+        "tracking.update_status",
     ],
     "SECRETARIA": [
+        "reclamos.read",
+        "reclamos.create",
+        "reclamos.update",
         "encomiendas.read",
         "encomiendas.write",
         "encomiendas.update",
@@ -223,13 +321,13 @@ BASE_ROLE_PERMISSIONS = {
         "optimization.run",
     ],
     "DEVELOPER": [
-        "developer.read",
-        "developer.write",
+        permission["code"] for permission in BASE_PERMISSIONS
     ],
 }
 
 BASE_ROLE_DESCRIPTIONS = {
-    "ADMINISTRADOR": "Acceso completo al sistema interno.",
+    "ADMIN_GENERAL": "Acceso global a la administracion interna, excluyendo developer y optimizacion.",
+    "AGENCY_ADMIN": "Administra la operacion y el personal de una unica agencia.",
     "SECRETARIA": "Gestiona registros, cotizaciones, boletas, etiquetas y tracking.",
     "ESTIBA": "Acceso exclusivo a la optimizacion y simulacion de carga.",
     "DEVELOPER": "Inspeccion tecnica de las tablas del sistema (solo lectura y exportacion).",

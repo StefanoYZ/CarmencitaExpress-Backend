@@ -4,7 +4,7 @@ from sqlalchemy import desc, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.core.business_time import business_today
+from app.core.business_time import business_now, business_today
 from app.modules.shipments.constants import (
     CANCELED_STATUS,
     DELIVERED_STATUS,
@@ -16,6 +16,7 @@ from app.modules.shipments.constants import (
 )
 from app.modules.shipments.model import Shipment
 from app.modules.shipments.schema import ShipmentCreate, ShipmentPreRegistrationCreate, ShipmentUpdate
+from app.modules.shipments.tracing import append_shipment_trace_event
 
 
 SHIPMENT_CODE_WEEKDAY = {
@@ -62,38 +63,95 @@ def generate_shipment_code(db: Session) -> str:
         next_sequence += 1
 
 
-def create_shipment(db: Session, shipment_data: ShipmentCreate) -> Shipment:
+def create_shipment(
+    db: Session,
+    shipment_data: ShipmentCreate,
+    agency_id: int | None = None,
+    privacy_channel: str = "INTERNAL",
+    actor_user_id: int | None = None,
+) -> Shipment:
     shipment = Shipment(
         shipment_code=generate_shipment_code(db),
         status=REGISTERED_STATUS,
-        registration_origin=INTERNAL_REGISTRATION_ORIGIN,
-        **shipment_data.model_dump(exclude={"status", *NON_PERSISTED_PAYLOAD_FIELDS}),
+        registration_origin=(EXTERNAL_REGISTRATION_ORIGIN if privacy_channel == "PUBLIC_WEB" else INTERNAL_REGISTRATION_ORIGIN),
+        agency_id=agency_id,
+        privacy_notice_version=(
+            shipment_data.privacy_notice_version if shipment_data.privacy_notice_accepted else None
+        ),
+        privacy_accepted_at=business_now() if shipment_data.privacy_notice_accepted else None,
+        privacy_channel=privacy_channel if shipment_data.privacy_notice_accepted else None,
+        **shipment_data.model_dump(
+            exclude={
+                "status",
+                "privacy_notice_accepted",
+                "privacy_notice_version",
+                *NON_PERSISTED_PAYLOAD_FIELDS,
+            }
+        ),
     )
-    return _commit_new_shipment_with_code_retry(db, shipment)
+    return _commit_new_shipment_with_code_retry(
+        db, shipment, actor_user_id=actor_user_id,
+        source="WEB" if privacy_channel == "PUBLIC_WEB" else "INTERNO",
+    )
 
 
-def create_pre_registration(db: Session, shipment_data: ShipmentPreRegistrationCreate) -> Shipment:
+def create_pre_registration(
+    db: Session,
+    shipment_data: ShipmentPreRegistrationCreate,
+    *,
+    privacy_accepted_at: datetime,
+    privacy_channel: str,
+) -> Shipment:
     shipment = Shipment(
         shipment_code=generate_shipment_code(db),
         status=PRE_REGISTERED_STATUS,
         registration_origin=EXTERNAL_REGISTRATION_ORIGIN,
-        **shipment_data.model_dump(exclude={"status", *NON_PERSISTED_PAYLOAD_FIELDS}),
+        privacy_notice_version=shipment_data.privacy_notice_version,
+        privacy_accepted_at=privacy_accepted_at,
+        privacy_channel=privacy_channel,
+        **shipment_data.model_dump(
+            exclude={"status", "privacy_notice_accepted", "privacy_notice_version", *NON_PERSISTED_PAYLOAD_FIELDS}
+        ),
     )
-    return _commit_new_shipment_with_code_retry(db, shipment)
+    return _commit_new_shipment_with_code_retry(db, shipment, source="WEB")
 
 
-def _commit_new_shipment_with_code_retry(db: Session, shipment: Shipment) -> Shipment:
+def _commit_new_shipment_with_code_retry(
+    db: Session,
+    shipment: Shipment,
+    *,
+    actor_user_id: int | None = None,
+    source: str = "SISTEMA",
+) -> Shipment:
     if not shipment.shipment_code.startswith(expected_shipment_code_prefix()):
         shipment.shipment_code = generate_shipment_code(db)
     try:
         with db.begin_nested():
             db.add(shipment)
             db.flush([shipment])
+            append_shipment_trace_event(
+                db, shipment,
+                event_type="PRE_REGISTRADA" if shipment.status == PRE_REGISTERED_STATUS else "REGISTRADA",
+                location=shipment.origin,
+                description="Se creó el pre-registro del envío." if shipment.status == PRE_REGISTERED_STATUS else "Se registró la encomienda.",
+                visible_to_customer=True,
+                actor_user_id=actor_user_id,
+                source=source,
+            )
     except IntegrityError:
         shipment.shipment_code = generate_shipment_code(db)
         with db.begin_nested():
             db.add(shipment)
             db.flush([shipment])
+            append_shipment_trace_event(
+                db, shipment,
+                event_type="PRE_REGISTRADA" if shipment.status == PRE_REGISTERED_STATUS else "REGISTRADA",
+                location=shipment.origin,
+                description="Se creó el pre-registro del envío." if shipment.status == PRE_REGISTERED_STATUS else "Se registró la encomienda.",
+                visible_to_customer=True,
+                actor_user_id=actor_user_id,
+                source=source,
+            )
     db.commit()
     db.refresh(shipment)
     return shipment
@@ -133,48 +191,81 @@ def _shipment_code_candidates(shipment_code: str) -> list[str]:
     return list(dict.fromkeys(candidates))
 
 
-def mark_shipment_as_quoted(db: Session, shipment: Shipment) -> Shipment:
+def mark_shipment_as_quoted(
+    db: Session, shipment: Shipment, *, actor_user_id: int | None = None
+) -> Shipment:
     if shipment.status == REGISTERED_STATUS:
         shipment.status = QUOTED_STATUS
         db.add(shipment)
+        _add_trace_event(
+            db, shipment, "COTIZADA", shipment.origin, "Se generó la cotización del envío.",
+            visible=True, actor_user_id=actor_user_id,
+        )
         db.commit()
         db.refresh(shipment)
     return shipment
 
 
-def confirm_pre_registration(db: Session, shipment: Shipment) -> Shipment:
+def confirm_pre_registration(
+    db: Session, shipment: Shipment, *, actor_user_id: int | None = None
+) -> Shipment:
     shipment.status = REGISTERED_STATUS
     shipment.registration_origin = EXTERNAL_REGISTRATION_ORIGIN
     db.add(shipment)
+    _add_trace_event(
+        db, shipment, "REGISTRADA", shipment.origin, "El pre-registro se confirmó como encomienda.",
+        visible=True, actor_user_id=actor_user_id,
+    )
     db.commit()
     db.refresh(shipment)
     return shipment
 
 
-def update_shipment(db: Session, shipment: Shipment, payload: ShipmentUpdate) -> Shipment:
+def update_shipment(
+    db: Session, shipment: Shipment, payload: ShipmentUpdate, *, actor_user_id: int | None = None
+) -> Shipment:
     update_data = payload.model_dump(exclude_unset=True)
+    changed = False
     for field, value in update_data.items():
         if field in PROTECTED_UPDATE_FIELDS:
             continue
+        if getattr(shipment, field) != value:
+            changed = True
         setattr(shipment, field, value)
     db.add(shipment)
+    if changed:
+        _add_trace_event(
+            db, shipment, "ACTUALIZADA", shipment.origin,
+            "Se actualizaron datos de la encomienda.", visible=False,
+            actor_user_id=actor_user_id,
+        )
     db.commit()
     db.refresh(shipment)
     return shipment
 
 
-def cancel_shipment_with_reason(db: Session, shipment: Shipment, reason: str) -> Shipment:
+def cancel_shipment_with_reason(
+    db: Session, shipment: Shipment, reason: str, *, actor_user_id: int | None = None
+) -> Shipment:
     shipment.status = CANCELED_STATUS
     shipment.cancellation_reason = reason
     shipment.canceled_at = datetime.now(timezone.utc)
     db.add(shipment)
+    _add_trace_event(
+        db, shipment, "ANULADA", shipment.origin, "La encomienda fue anulada.",
+        visible=True, actor_user_id=actor_user_id,
+    )
     db.commit()
     db.refresh(shipment)
     return shipment
 
 
-def cancel_shipment(db: Session, shipment: Shipment) -> Shipment:
-    return cancel_shipment_with_reason(db, shipment, "Anulacion solicitada desde endpoint DELETE")
+def cancel_shipment(
+    db: Session, shipment: Shipment, *, actor_user_id: int | None = None
+) -> Shipment:
+    return cancel_shipment_with_reason(
+        db, shipment, "Anulacion solicitada desde endpoint DELETE", actor_user_id=actor_user_id
+    )
 
 
 def get_label_data(db: Session, shipment_id: int) -> Shipment | None:
@@ -186,12 +277,42 @@ def mark_as_delivered(
     shipment: Shipment,
     receiver_document: str,
     signature_base64: str | None,
+    *,
+    actor_user_id: int | None = None,
 ) -> Shipment:
     shipment.status = DELIVERED_STATUS
     shipment.delivered_at = datetime.now(timezone.utc)
     shipment.delivery_receiver_document = receiver_document
     shipment.digital_signature_base64 = signature_base64
     db.add(shipment)
+    _add_trace_event(
+        db, shipment, "ENTREGADA", shipment.destination,
+        "La encomienda fue registrada como entregada.", visible=True,
+        actor_user_id=actor_user_id,
+    )
     db.commit()
     db.refresh(shipment)
     return shipment
+
+
+def _add_trace_event(
+    db: Session,
+    shipment: Shipment,
+    event_type: str,
+    location: str | None,
+    description: str,
+    *,
+    visible: bool,
+    source: str | None = None,
+    actor_user_id: int | None = None,
+) -> None:
+    append_shipment_trace_event(
+        db,
+        shipment,
+        event_type=event_type,
+        location=location,
+        description=description,
+        actor_user_id=actor_user_id,
+        source=source or ("INTERNO" if actor_user_id is not None else "SISTEMA"),
+        visible_to_customer=visible,
+    )

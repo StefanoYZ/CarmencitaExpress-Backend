@@ -1,9 +1,15 @@
 from sqlalchemy.orm import Session
+import pytest
 
 from app.core.config import settings
 from app.modules.charge_logs.model import ChargeLog
 from app.modules.sunat.model import ElectronicReceipt
 from app.modules.sunat import service as sunat_service
+
+
+@pytest.fixture(autouse=True)
+def authenticated_client(api_client, admin_headers):
+    api_client.headers.update(admin_headers)
 
 
 def test_card_payment_success_persists_charge_log(

@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.dependencies import require_permission
+from app.modules.agencies.service import is_agency_admin
 from app.modules.users.schema import (
     PermissionCreate,
     PermissionResponse,
@@ -48,30 +49,33 @@ permissions_router = APIRouter(prefix="/permissions", tags=["Permissions"])
 def create_user_endpoint(
     payload: UserCreate,
     db: Session = Depends(get_db),
-    _current_user=Depends(require_permission("users.write")),
+    current_user=Depends(require_permission("users.write")),
 ) -> UserResponse:
-    try:
-        return create_user(db, payload)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="Los usuarios internos se crean únicamente desde una agencia existente.",
+    )
 
 
 @users_router.get("", response_model=list[UserResponse])
 def list_users_endpoint(
     db: Session = Depends(get_db),
-    _current_user=Depends(require_permission("users.read")),
+    current_user=Depends(require_permission("users.read")),
 ) -> list[UserResponse]:
-    return list_users(db)
+    users = list_users(db)
+    if is_agency_admin(current_user):
+        return [user for user in users if user.agency_id == current_user.agency_id]
+    return users
 
 
 @users_router.get("/{user_id}", response_model=UserResponse)
 def get_user_endpoint(
     user_id: int,
     db: Session = Depends(get_db),
-    _current_user=Depends(require_permission("users.read")),
+    current_user=Depends(require_permission("users.read")),
 ) -> UserResponse:
     user = get_user(db, user_id)
-    if user is None:
+    if user is None or not _user_is_in_context(user, current_user):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     return user
 
@@ -81,8 +85,9 @@ def update_user_endpoint(
     user_id: int,
     payload: UserUpdate,
     db: Session = Depends(get_db),
-    _current_user=Depends(require_permission("users.update")),
+    current_user=Depends(require_permission("users.update")),
 ) -> UserResponse:
+    _require_user_in_context(db, user_id, current_user)
     try:
         user = update_user(db, user_id, payload)
     except ValueError as exc:
@@ -99,6 +104,7 @@ def update_user_status_endpoint(
     db: Session = Depends(get_db),
     current_user=Depends(require_permission("users.disable")),
 ) -> UserResponse:
+    _require_user_in_context(db, user_id, current_user)
     if current_user.id == user_id and not payload.is_active:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -115,8 +121,16 @@ def assign_role_to_user_endpoint(
     user_id: int,
     role_id: int,
     db: Session = Depends(get_db),
-    _current_user=Depends(require_permission("users.update")),
+    current_user=Depends(require_permission("users.update")),
 ) -> UserResponse:
+    role = get_role(db, role_id)
+    if role is not None and role.name in {"AGENCY_ADMIN", "SECRETARIA", "ESTIBA"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"El rol {role.name} se asigna desde el contexto de una agencia.",
+        )
+    if not any(item.name == "DEVELOPER" and item.is_active for item in current_user.roles):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Gestión reservada a la cuenta técnica")
     try:
         user = assign_role_to_user(db, user_id, role_id)
     except LookupError as exc:
@@ -133,8 +147,16 @@ def remove_role_from_user_endpoint(
     user_id: int,
     role_id: int,
     db: Session = Depends(get_db),
-    _current_user=Depends(require_permission("users.update")),
+    current_user=Depends(require_permission("users.update")),
 ) -> UserResponse:
+    role = get_role(db, role_id)
+    if role is not None and role.name in {"AGENCY_ADMIN", "SECRETARIA", "ESTIBA"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"El rol {role.name} se administra desde el contexto de una agencia.",
+        )
+    if not any(item.name == "DEVELOPER" and item.is_active for item in current_user.roles):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Gestión reservada a la cuenta técnica")
     try:
         user = remove_role_from_user(db, user_id, role_id)
     except LookupError as exc:

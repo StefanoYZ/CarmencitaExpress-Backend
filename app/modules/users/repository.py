@@ -33,12 +33,18 @@ def get_user_by_username(db: Session, value: str) -> InternalUser | None:
     )
 
 
-def create_user(db: Session, payload: UserCreate, password_hash: str) -> InternalUser:
+def create_user(
+    db: Session,
+    payload: UserCreate,
+    password_hash: str,
+    agency_id: int | None = None,
+) -> InternalUser:
     user = InternalUser(
         username=payload.username,
         password_hash=password_hash,
         full_name=payload.full_name,
         is_active=True,
+        agency_id=agency_id,
     )
     db.add(user)
     db.commit()

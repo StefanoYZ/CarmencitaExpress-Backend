@@ -3,6 +3,7 @@ import json
 
 from sqlalchemy.orm import Session
 
+from app.core.business_time import business_now
 from app.modules.clients.service import upsert_client_from_person_data
 from app.modules.measurement_logs.service import (
     ensure_boleta_log_after_payment,
@@ -30,14 +31,28 @@ from app.modules.shipments.schema import (
 )
 
 
-def create_shipment(db: Session, payload: ShipmentCreate) -> Shipment:
+def create_shipment(
+    db: Session,
+    payload: ShipmentCreate,
+    agency_id: int | None = None,
+    privacy_channel: str = "INTERNAL",
+    actor_user_id: int | None = None,
+) -> Shipment:
     _upsert_clients_from_shipment_payload(db, payload, commit=False)
-    return repository.create_shipment(db, payload)
+    return repository.create_shipment(
+        db, payload, agency_id=agency_id, privacy_channel=privacy_channel,
+        actor_user_id=actor_user_id,
+    )
 
 
 def create_pre_registration(db: Session, payload: ShipmentPreRegistrationCreate) -> Shipment:
     _upsert_clients_from_shipment_payload(db, payload, commit=False)
-    shipment = repository.create_pre_registration(db, payload)
+    shipment = repository.create_pre_registration(
+        db,
+        payload,
+        privacy_accepted_at=business_now(),
+        privacy_channel="PUBLIC_WEB",
+    )
     start_service_phase(
         db,
         "registro",
@@ -59,12 +74,15 @@ def get_shipment_by_code(db: Session, shipment_code: str) -> Shipment | None:
     return repository.get_shipment_by_code(db, shipment_code)
 
 
-def mark_shipment_as_quoted(db: Session, shipment: Shipment) -> Shipment:
-    return repository.mark_shipment_as_quoted(db, shipment)
+def mark_shipment_as_quoted(
+    db: Session, shipment: Shipment, *, actor_user_id: int | None = None
+) -> Shipment:
+    return repository.mark_shipment_as_quoted(db, shipment, actor_user_id=actor_user_id)
 
 
 def confirm_pre_registration(
-    db: Session, shipment_id: int, base_orientation: str | None = None
+    db: Session, shipment_id: int, base_orientation: str | None = None,
+    *, actor_user_id: int | None = None,
 ) -> Shipment | None:
     shipment = repository.get_shipment_by_id(db, shipment_id)
     if shipment is None:
@@ -84,22 +102,25 @@ def confirm_pre_registration(
         db.flush()
     if shipment.content_type != "DOCUMENTOS" and not shipment.base_orientation:
         raise ValueError("Falta seleccionar la cara/base del paquete antes de confirmar el pre-registro")
-    shipment = repository.confirm_pre_registration(db, shipment)
+    shipment = repository.confirm_pre_registration(db, shipment, actor_user_id=actor_user_id)
     try:
-        finish_service_phase(db, "registro", encomienda_id=shipment.id)
+        finish_service_phase(db, "registro", encomienda_id=shipment.id, usuario_id=actor_user_id)
     except LookupError:
         start_service_phase(
             db,
             "registro",
             encomienda_id=shipment.id,
             timestamp_inicio=shipment.created_at,
+            usuario_id=actor_user_id,
         )
-        finish_service_phase(db, "registro", encomienda_id=shipment.id)
+        finish_service_phase(db, "registro", encomienda_id=shipment.id, usuario_id=actor_user_id)
     ensure_boleta_log_after_payment(db, encomienda_id=shipment.id)
     return shipment
 
 
-def update_shipment(db: Session, shipment_id: int, payload: ShipmentUpdate) -> Shipment | None:
+def update_shipment(
+    db: Session, shipment_id: int, payload: ShipmentUpdate, *, actor_user_id: int | None = None
+) -> Shipment | None:
     shipment = repository.get_shipment_by_id(db, shipment_id)
     if shipment is None:
         return None
@@ -108,10 +129,12 @@ def update_shipment(db: Session, shipment_id: int, payload: ShipmentUpdate) -> S
     if payload.status is not None and payload.status != shipment.status:
         raise ValueError("No se puede modificar el estado desde este endpoint")
     _upsert_clients_from_shipment_payload(db, payload, commit=False)
-    return repository.update_shipment(db, shipment, payload)
+    return repository.update_shipment(db, shipment, payload, actor_user_id=actor_user_id)
 
 
-def cancel_shipment_with_reason(db: Session, shipment_id: int, reason: str) -> Shipment | None:
+def cancel_shipment_with_reason(
+    db: Session, shipment_id: int, reason: str, *, actor_user_id: int | None = None
+) -> Shipment | None:
     shipment = repository.get_shipment_by_id(db, shipment_id)
     if shipment is None:
         return None
@@ -121,17 +144,25 @@ def cancel_shipment_with_reason(db: Session, shipment_id: int, reason: str) -> S
         raise ValueError("No se puede anular una encomienda entregada")
     if not reason or not reason.strip():
         raise ValueError("El motivo de anulacion es obligatorio")
-    return repository.cancel_shipment_with_reason(db, shipment, reason.strip())
+    return repository.cancel_shipment_with_reason(
+        db, shipment, reason.strip(), actor_user_id=actor_user_id
+    )
 
 
-def cancel_shipment(db: Session, shipment_id: int) -> Shipment | None:
-    return cancel_shipment_with_reason(db, shipment_id, "Anulacion solicitada desde endpoint DELETE")
+def cancel_shipment(
+    db: Session, shipment_id: int, *, actor_user_id: int | None = None
+) -> Shipment | None:
+    return cancel_shipment_with_reason(
+        db, shipment_id, "Anulacion solicitada desde endpoint DELETE", actor_user_id=actor_user_id
+    )
 
 
 PRE_REGISTRO_EXPIRY_DAYS = 3
 
 
-def delete_expired_pre_registration(db: Session, shipment_id: int) -> Shipment | None:
+def delete_expired_pre_registration(
+    db: Session, shipment_id: int, *, actor_user_id: int | None = None
+) -> Shipment | None:
     """Elimina (anula) un pre-registro que lleva más de PRE_REGISTRO_EXPIRY_DAYS días sin confirmarse."""
     shipment = repository.get_shipment_by_id(db, shipment_id)
     if shipment is None:
@@ -148,6 +179,7 @@ def delete_expired_pre_registration(db: Session, shipment_id: int) -> Shipment |
         db,
         shipment,
         f"Pre-registro eliminado por vencimiento ({PRE_REGISTRO_EXPIRY_DAYS} días sin confirmar)",
+        actor_user_id=actor_user_id,
     )
 
 
@@ -284,7 +316,9 @@ def generate_label_pdf(db: Session, shipment_id: int) -> tuple[str, bytes] | Non
     return f"etiqueta_{label.shipment_code}.pdf", buffer.read()
 
 
-def mark_as_delivered(db: Session, shipment_id: int, payload: DeliveryRequest) -> Shipment | None:
+def mark_as_delivered(
+    db: Session, shipment_id: int, payload: DeliveryRequest, *, actor_user_id: int | None = None
+) -> Shipment | None:
     shipment = repository.get_shipment_by_id(db, shipment_id)
     if shipment is None:
         return None
@@ -301,9 +335,10 @@ def mark_as_delivered(db: Session, shipment_id: int, payload: DeliveryRequest) -
         shipment=shipment,
         receiver_document=payload.receiver_document,
         signature_base64=payload.signature_base64,
+        actor_user_id=actor_user_id,
     )
     try:
-        finish_service_phase(db, "entrega", encomienda_id=delivered.id)
+        finish_service_phase(db, "entrega", encomienda_id=delivered.id, usuario_id=actor_user_id)
     except (LookupError, ValueError):
         pass
     return delivered

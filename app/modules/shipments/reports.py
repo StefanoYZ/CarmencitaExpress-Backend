@@ -39,9 +39,13 @@ def build_operational_report_rows(
     report_date: date | None = None,
     status: str | None = None,
     search: str | None = None,
+    agency_id: int | None = None,
 ) -> list[list[str]]:
+    shipment_query = list_shipments(db)
+    if agency_id is not None:
+        shipment_query = [shipment for shipment in shipment_query if shipment.agency_id == agency_id]
     shipments = _filter_shipments(
-        list_shipments(db),
+        shipment_query,
         report_date=report_date,
         status=status,
         search=search,

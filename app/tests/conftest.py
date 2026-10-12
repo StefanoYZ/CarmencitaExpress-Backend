@@ -11,9 +11,12 @@ os.environ.setdefault("SUNAT_ENV", "mock")
 
 from app.core.database import Base, get_db
 from app.main import app
+from app.modules.agencies import model as agencies_model  # noqa: F401
+from app.modules.agencies.model import Agency
 from app.modules.charge_logs import model as charge_logs_model  # noqa: F401
 from app.modules.clients import model as clients_model  # noqa: F401
 from app.modules.destinations import model as destinations_model  # noqa: F401
+from app.modules.destinations.model import Destination
 from app.modules.destinations.service import seed_default_destinations
 from app.modules.shipments import model as shipments_model  # noqa: F401
 from app.modules.sunat import model as sunat_model  # noqa: F401
@@ -44,9 +47,10 @@ def db_session() -> Generator[Session, None, None]:
     db = TestingSessionLocal()
     seed_initial_access_control(db)
     seed_default_destinations(db)
-    _create_role_user(db, "qa_admin", "ADMINISTRADOR")
-    _create_role_user(db, "qa_secretaria", "SECRETARIA")
-    _create_role_user(db, "qa_estiba", "ESTIBA")
+    _create_role_user(db, "qa_admin", "ADMIN_GENERAL")
+    operational_agency = _create_operational_test_agency(db)
+    _create_role_user(db, "qa_secretaria", "SECRETARIA", agency_id=operational_agency.id)
+    _create_role_user(db, "qa_estiba", "ESTIBA", agency_id=operational_agency.id)
 
     try:
         yield db
@@ -109,10 +113,12 @@ def valid_shipment_payload() -> dict:
         "alto_cm": 20,
         "fragilidad": "MEDIA",
         "orientacion_base": "LARGO_ANCHO",
+        "aviso_privacidad_aceptado": True,
+        "version_aviso_privacidad": "2026-10-11",
     }
 
 
-def _create_role_user(db: Session, username: str, role_name: str) -> None:
+def _create_role_user(db: Session, username: str, role_name: str, agency_id: int | None = None) -> None:
     user = create_user(
         db,
         UserCreate(
@@ -122,7 +128,25 @@ def _create_role_user(db: Session, username: str, role_name: str) -> None:
         ),
     )
     role = users_repository.get_role_by_name(db, role_name)
-    assign_role_to_user(db, user.id, role.id)
+    if agency_id is None:
+        assign_role_to_user(db, user.id, role.id)
+        return
+    persisted = users_repository.get_user_by_id(db, user.id)
+    persisted.agency_id = agency_id
+    persisted.roles.append(role)
+    db.add(persisted)
+    db.commit()
+
+
+def _create_operational_test_agency(db: Session) -> Agency:
+    destination = Destination(name="QA Operativa", normalized_name="qa operativa", is_active=True)
+    db.add(destination)
+    db.flush()
+    agency = Agency(code="AG-QA-OPERATIVA", destination_id=destination.id, is_active=True)
+    db.add(agency)
+    db.commit()
+    db.refresh(agency)
+    return agency
 
 
 def _login_headers(client: TestClient, username: str) -> dict[str, str]:

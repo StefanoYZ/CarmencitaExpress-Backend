@@ -1,4 +1,4 @@
-from sqlalchemy import Column, DateTime, Float, Integer, String, Text
+from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String, Text
 
 from app.core.business_time import business_now
 from app.core.database import Base
@@ -40,6 +40,10 @@ class Shipment(Base):
     delivery_receiver_document = Column("dni_receptor_entrega", String(20), nullable=True)
     digital_signature_base64 = Column("firma_digital_base64", Text, nullable=True)
     security_key = Column("clave_seguridad", String(50), nullable=True)
+    agency_id = Column(Integer, ForeignKey("agencias.id"), index=True, nullable=True)
+    privacy_notice_version = Column(String(40), nullable=True)
+    privacy_accepted_at = Column(DateTime(timezone=True), nullable=True)
+    privacy_channel = Column(String(40), nullable=True)
 
     created_at = Column(DateTime(timezone=True), default=business_now, nullable=False)
     updated_at = Column(

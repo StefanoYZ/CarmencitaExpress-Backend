@@ -58,17 +58,15 @@ OPTIMIZABLE_SHIPMENT_STATUSES = {
 }
 
 
-def list_registered_packages(db: Session, limit: int | None = None) -> list[Package]:
+def list_registered_packages(db: Session, limit: int | None = None, agency_id: int | None = None) -> list[Package]:
     # Filtra por estado en SQL (portable) y por "día de negocio" en Python con
     # ensure_business_tz, para no depender de cómo cada motor (SQLite/Postgres)
     # almacena la zona horaria de created_at.
     hoy = business_today()
-    shipments = (
-        db.query(Shipment)
-        .filter(Shipment.status.in_(OPTIMIZABLE_SHIPMENT_STATUSES))
-        .order_by(Shipment.created_at.asc(), Shipment.id.asc())
-        .all()
-    )
+    query = db.query(Shipment).filter(Shipment.status.in_(OPTIMIZABLE_SHIPMENT_STATUSES))
+    if agency_id is not None:
+        query = query.filter(Shipment.agency_id == agency_id)
+    shipments = query.order_by(Shipment.created_at.asc(), Shipment.id.asc()).all()
     reales_del_dia = [
         shipment
         for shipment in shipments
@@ -86,7 +84,7 @@ def _is_test_shipment(shipment: Shipment) -> bool:
     return str(shipment.description or "").startswith(TEST_PACKAGE_MARKER)
 
 
-def list_registered_packages_by_codes(db: Session, codes: list[str]) -> list[Package]:
+def list_registered_packages_by_codes(db: Session, codes: list[str], agency_id: int | None = None) -> list[Package]:
     normalized_codes = [code.strip().upper() for code in codes if code and code.strip()]
     if not normalized_codes:
         return []
@@ -96,14 +94,13 @@ def list_registered_packages_by_codes(db: Session, codes: list[str]) -> list[Pac
     # preserva tz— eso compara la hora de pared (Lima) contra límites en UTC y
     # excluye registros válidos durante la madrugada de Lima (Riesgo R1 / DEF-002).
     hoy = business_today()
-    shipments = (
-        db.query(Shipment)
-        .filter(
-            Shipment.status.in_(OPTIMIZABLE_SHIPMENT_STATUSES),
-            Shipment.shipment_code.in_(normalized_codes),
-        )
-        .all()
+    query = db.query(Shipment).filter(
+        Shipment.status.in_(OPTIMIZABLE_SHIPMENT_STATUSES),
+        Shipment.shipment_code.in_(normalized_codes),
     )
+    if agency_id is not None:
+        query = query.filter(Shipment.agency_id == agency_id)
+    shipments = query.all()
     shipment_by_code = {
         shipment.shipment_code.upper(): shipment
         for shipment in shipments

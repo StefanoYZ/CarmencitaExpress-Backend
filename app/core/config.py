@@ -53,6 +53,10 @@ class Settings(BaseSettings):
     groq_model: str = Field(default="openai/gpt-oss-20b", alias="GROQ_MODEL")
     assistant_llm_enabled: bool = Field(default=False, alias="ASSISTANT_LLM_ENABLED")
 
+    # Libro de Reclamaciones: mantener vacío hasta que el responsable confirme los datos legales.
+    claims_company_address: Optional[str] = Field(default=None, alias="CLAIMS_COMPANY_ADDRESS")
+    claims_contact_email: Optional[str] = Field(default=None, alias="CLAIMS_CONTACT_EMAIL")
+
     # Búsqueda web (recojo externo: sedes de agencias). Provider por defecto: Serper
     # (https://serper.dev). Si no se configura la key, el asistente pide la dirección
     # exacta en lugar de buscar en internet.
@@ -63,6 +67,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
+        env_ignore_empty=True,
         extra="ignore",
     )
 

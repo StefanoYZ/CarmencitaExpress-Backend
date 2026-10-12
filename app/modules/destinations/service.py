@@ -62,6 +62,11 @@ def update_destination(
         existing = repository.get_destination_by_name(db, payload.name)
         if existing and existing.id != destination.id:
             raise ValueError("El destino ya existe")
+    if payload.is_active is False:
+        from app.modules.agencies.model import Agency
+
+        if db.query(Agency.id).filter(Agency.destination_id == destination.id).first():
+            raise ValueError("No se puede desactivar un destino con una agencia vinculada")
     return repository.update_destination(db, destination, payload)
 
 

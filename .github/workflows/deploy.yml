@@ -134,6 +134,8 @@ jobs:
             AUTO_CREATE_SCHEMA=false
             SUNAT_ENV=mock
             SUNAT_ALLOW_REAL_EMISSION=false
+            CLAIMS_COMPANY_ADDRESS=${{ vars.CLAIMS_COMPANY_ADDRESS }}
+            CLAIMS_CONTACT_EMAIL=${{ vars.CLAIMS_CONTACT_EMAIL }}
           env_vars_update_strategy: merge
           secrets: |-
             DB_PASSWORD=carmencita-db-password:latest

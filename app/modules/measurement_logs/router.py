@@ -33,6 +33,8 @@ from app.modules.measurement_logs.service import (
     start_service_phase,
     username_from_user,
 )
+from app.modules.shipments.repository import get_shipment_by_id
+from app.modules.shipments.tracing import append_shipment_trace_event
 
 
 boletas_router = APIRouter(prefix="/logs/boletas", tags=["measurement logs"])
@@ -47,7 +49,7 @@ def start_boleta_log_endpoint(
     db: Session = Depends(get_db),
 ) -> LogBoletaResponse:
     current_user = resolve_user_from_authorization(db, authorization)
-    return start_boleta_log(
+    log = start_boleta_log(
         db,
         encomienda_id=payload.encomienda_id,
         boleta_id=payload.boleta_id,
@@ -57,16 +59,44 @@ def start_boleta_log_endpoint(
         canal=payload.canal,
         timestamp_inicio=payload.timestamp,
     )
+    shipment = get_shipment_by_id(db, log.encomienda_id) if log.encomienda_id else None
+    if shipment is not None:
+        append_shipment_trace_event(
+            db,
+            shipment,
+            event_type="BOLETA_EMISION_INICIADA",
+            description="Se inició el registro de emisión de boleta.",
+            actor_user_id=current_user.id if current_user else None,
+            source="INTERNO" if current_user else "SISTEMA",
+            visible_to_customer=False,
+        )
+        db.commit()
+    return log
 
 
 @boletas_router.post("/{log_id}/finalizar", response_model=LogBoletaResponse)
 def finish_boleta_log_endpoint(
     log_id: int,
     payload: LogBoletaFinishRequest | None = Body(default=None),
+    authorization: str | None = Header(default=None),
     db: Session = Depends(get_db),
 ) -> LogBoletaResponse:
+    current_user = resolve_user_from_authorization(db, authorization)
     try:
-        return finish_boleta_log(db, log_id, timestamp_fin=payload.timestamp_fin if payload else None)
+        log = finish_boleta_log(db, log_id, timestamp_fin=payload.timestamp_fin if payload else None)
+        shipment = get_shipment_by_id(db, log.encomienda_id) if log.encomienda_id else None
+        if shipment is not None:
+            append_shipment_trace_event(
+                db,
+                shipment,
+                event_type="BOLETA_EMISION_FINALIZADA",
+                description="Finalizó el registro de emisión de boleta.",
+                actor_user_id=current_user.id if current_user else None,
+                source="INTERNO" if current_user else "SISTEMA",
+                visible_to_customer=False,
+            )
+            db.commit()
+        return log
     except LookupError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ValueError as exc:
@@ -213,7 +243,7 @@ def _start_service_phase_endpoint(
         cotizacion_id=payload.cotizacion_id,
         pago_id=payload.pago_id,
         despacho_id=payload.despacho_id,
-        usuario_id=current_user.id if current_user else payload.usuario_id,
+            usuario_id=current_user.id if current_user else None,
         usuario_correo=username_from_user(current_user, payload.usuario_correo),
         timestamp_inicio=payload.timestamp,
     )
@@ -237,7 +267,7 @@ def _finish_service_phase_endpoint(
             cotizacion_id=payload.cotizacion_id if payload else None,
             pago_id=payload.pago_id if payload else None,
             despacho_id=payload.despacho_id if payload else None,
-            usuario_id=current_user.id if current_user else payload.usuario_id if payload else None,
+            usuario_id=current_user.id if current_user else None,
             usuario_correo=username_from_user(current_user, payload.usuario_correo if payload else None),
             timestamp_fin=payload.timestamp_fin if payload else None,
         )
@@ -266,6 +296,7 @@ def iniciar_orden_endpoint(
             encomienda_ids=payload.encomienda_ids,
             orden_carga_id=payload.orden_carga_id,
             usuario_correo=username_from_user(current_user, payload.usuario_correo),
+            actor_user_id=current_user.id if current_user else None,
             actor_origen=payload.actor_origen,
             canal=payload.canal,
             modo_prueba=payload.modo_prueba,
@@ -283,13 +314,16 @@ def finalizar_paquete_endpoint(
     orden_carga_id: str,
     encomienda_id: int,
     payload: FinalizarPaqueteCargaRequest | None = Body(default=None),
+    authorization: str | None = Header(default=None),
     db: Session = Depends(get_db),
 ) -> LogCargaPaqueteResponse:
+    current_user = resolve_user_from_authorization(db, authorization)
     try:
         log, _ = finalizar_paquete_carga(
             db,
             orden_carga_id,
             encomienda_id,
+            actor_user_id=current_user.id if current_user else None,
             timestamp_fin=payload.timestamp_fin if payload else None,
             accion_fin=payload.accion_fin if payload else "siguiente_simulado",
         )
@@ -307,14 +341,17 @@ def finalizar_paquete_endpoint(
 def siguiente_simulado_endpoint(
     orden_carga_id: str,
     encomienda_id: int = Query(..., description="ID de la encomienda actual a finalizar"),
+    authorization: str | None = Header(default=None),
     db: Session = Depends(get_db),
 ) -> LogCargaPaqueteResponse:
     """Finaliza el paquete actual en modo simulación (equivale a escanear QR)."""
+    current_user = resolve_user_from_authorization(db, authorization)
     try:
         log, _ = finalizar_paquete_carga(
             db,
             orden_carga_id,
             encomienda_id,
+            actor_user_id=current_user.id if current_user else None,
             accion_fin="siguiente_simulado",
         )
         return log

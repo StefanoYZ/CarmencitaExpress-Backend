@@ -34,7 +34,7 @@ def test_estiba_no_accede_a_developer_view(api_client, estiba_headers):
 
 
 def test_admin_no_accede_a_developer_view(api_client, admin_headers):
-    # La vista developer es exclusiva del rol DEVELOPER; el ADMINISTRADOR ya no
+    # La vista developer es exclusiva del rol DEVELOPER; el ADMIN_GENERAL ya no
     # tiene los permisos developer.* (evaluacion asincrona del docente).
     response = api_client.get("/api/v1/developer/tablas", headers=admin_headers)
     assert response.status_code == 403, response.text
@@ -76,9 +76,9 @@ def test_developer_tabla_inexistente_devuelve_404(api_client, db_session):
     assert response.status_code == 404
 
 
-def test_developer_exporta_csv_y_excel(api_client, db_session, valid_shipment_payload):
+def test_developer_exporta_csv_y_excel(api_client, db_session, valid_shipment_payload, admin_headers):
     headers = _developer_headers(api_client, db_session)
-    created = api_client.post("/api/v1/encomiendas", json=valid_shipment_payload)
+    created = api_client.post("/api/v1/encomiendas", headers=admin_headers, json=valid_shipment_payload)
     assert created.status_code == 201, created.text
 
     csv_response = api_client.get(

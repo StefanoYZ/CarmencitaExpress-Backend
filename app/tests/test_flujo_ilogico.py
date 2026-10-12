@@ -9,6 +9,11 @@ Aislamiento: SQLite en memoria (conftest), SUNAT_ENV=mock. Nomenclatura: FLU-xx.
 """
 import pytest
 
+
+@pytest.fixture(autouse=True)
+def authenticated_client(api_client, admin_headers):
+    api_client.headers.update(admin_headers)
+
 from app.core.config import settings
 
 

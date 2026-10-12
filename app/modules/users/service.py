@@ -132,6 +132,8 @@ def assign_role_to_user(db: Session, user_id: int, role_id: int) -> UserResponse
         raise LookupError("Role not found")
     if not role.is_active:
         raise ValueError("No se puede asignar un rol inactivo")
+    if role.name in {"AGENCY_ADMIN", "SECRETARIA", "ESTIBA"}:
+        raise ValueError(f"{role.name} solo se asigna desde el contexto de una agencia")
     if any(existing_role.id == role.id for existing_role in user.roles):
         raise ValueError("El usuario ya tiene asignado ese rol")
     updated_user = repository.assign_role_to_user(db, user, role)
@@ -220,6 +222,7 @@ def build_user_response(user: InternalUser) -> UserResponse:
         username=user.username,
         full_name=user.full_name,
         is_active=user.is_active,
+        agency_id=user.agency_id,
         roles=[role.name for role in active_roles],
         permissions=sorted(get_user_permission_codes(user)),
         created_at=user.created_at,
@@ -241,6 +244,7 @@ def build_role_response(role: Role) -> RoleResponse:
 
 
 def seed_initial_access_control(db: Session) -> AssignmentResponse:
+    _migrate_legacy_administrator_role(db)
     permissions_by_code: dict[str, Permission] = {}
     for permission_data in BASE_PERMISSIONS:
         permission = repository.get_permission_by_code(db, permission_data["code"])
@@ -270,7 +274,7 @@ def seed_initial_access_control(db: Session) -> AssignmentResponse:
             role = repository.get_role_by_id(db, role.id)
 
         desired_codes = set(permission_codes)
-        if role.name == "ESTIBA":
+        if role.name in {"ESTIBA", "ADMIN_GENERAL", "DEVELOPER"}:
             permissions_to_remove = [
                 permission
                 for permission in role.permissions
@@ -300,11 +304,37 @@ def seed_initial_access_control(db: Session) -> AssignmentResponse:
             hash_password(settings.default_admin_password),
         )
 
-    admin_role = roles_by_name["ADMINISTRADOR"]
+    admin_role = roles_by_name["ADMIN_GENERAL"]
     if not any(role.id == admin_role.id for role in admin.roles):
         repository.assign_role_to_user(db, admin, admin_role)
 
     return AssignmentResponse(success=True, message="Seed inicial de usuarios, roles y permisos verificado")
+
+
+def _migrate_legacy_administrator_role(db: Session) -> None:
+    """Rename the legacy role without losing its user and permission relations."""
+    legacy = repository.get_role_by_name(db, "ADMINISTRADOR")
+    if legacy is None:
+        return
+
+    canonical = repository.get_role_by_name(db, "ADMIN_GENERAL")
+    if canonical is None:
+        legacy.name = "ADMIN_GENERAL"
+        legacy.description = BASE_ROLE_DESCRIPTIONS["ADMIN_GENERAL"]
+        legacy.is_active = True
+        db.add(legacy)
+        db.commit()
+        return
+
+    for user in list(legacy.users):
+        if not any(role.id == canonical.id for role in user.roles):
+            user.roles.append(canonical)
+        user.roles.remove(legacy)
+    for permission in list(legacy.permissions):
+        if not any(item.id == permission.id for item in canonical.permissions):
+            canonical.permissions.append(permission)
+    db.delete(legacy)
+    db.commit()
 
 
 def _ensure_username_available(db: Session, username: str) -> None:

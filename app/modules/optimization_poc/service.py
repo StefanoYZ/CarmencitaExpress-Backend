@@ -34,9 +34,9 @@ from app.modules.optimization_poc.validators import is_weight_allowed, recompute
 from app.modules.measurement_logs.service import start_service_phase
 
 
-def get_scenario(limit: int | None = None, db: Session | None = None) -> ScenarioResponse:
+def get_scenario(limit: int | None = None, db: Session | None = None, agency_id: int | None = None) -> ScenarioResponse:
     return ScenarioResponse(
-        packages=_source_packages(limit=limit, db=db),
+        packages=_source_packages(limit=limit, db=db, agency_id=agency_id),
         trucks=list_trucks(),
         coordinate_system={
             "x": "ancho del camion",
@@ -60,38 +60,60 @@ def ordered_packages(
     return [package.to_schema() for package in get_packing_algorithm(strategy).order_packages(packages)]
 
 
-def run_first_fit(request: RunRequest, db: Session | None = None) -> SimulationResponse:
-    return _run_simulation(request, algorithm=FIRST_FIT_3D, strategy_id=FIRST_FIT_3D, strategy=None, db=db)
+def run_first_fit(
+    request: RunRequest, db: Session | None = None, agency_id: int | None = None,
+    actor_user_id: int | None = None,
+) -> SimulationResponse:
+    return _run_simulation(request, algorithm=FIRST_FIT_3D, strategy_id=FIRST_FIT_3D, strategy=None, db=db, agency_id=agency_id, actor_user_id=actor_user_id)
 
 
-def run_best_fit(request: RunRequest, db: Session | None = None) -> SimulationResponse:
-    return _run_simulation(request, algorithm=BEST_FIT_3D, strategy_id=BEST_FIT_3D, strategy=None, db=db)
+def run_best_fit(
+    request: RunRequest, db: Session | None = None, agency_id: int | None = None,
+    actor_user_id: int | None = None,
+) -> SimulationResponse:
+    return _run_simulation(request, algorithm=BEST_FIT_3D, strategy_id=BEST_FIT_3D, strategy=None, db=db, agency_id=agency_id, actor_user_id=actor_user_id)
 
 
-def run_worst_fit(request: RunRequest, db: Session | None = None) -> SimulationResponse:
-    return _run_simulation(request, algorithm=WORST_FIT, strategy_id=WORST_FIT, strategy=None, db=db)
+def run_worst_fit(
+    request: RunRequest, db: Session | None = None, agency_id: int | None = None,
+    actor_user_id: int | None = None,
+) -> SimulationResponse:
+    return _run_simulation(request, algorithm=WORST_FIT, strategy_id=WORST_FIT, strategy=None, db=db, agency_id=agency_id, actor_user_id=actor_user_id)
 
 
-def run_best_fit_decreasing(request: RunRequest, db: Session | None = None) -> SimulationResponse:
+def run_best_fit_decreasing(
+    request: RunRequest, db: Session | None = None, agency_id: int | None = None,
+    actor_user_id: int | None = None,
+) -> SimulationResponse:
     return _run_simulation(
         request,
         algorithm=BEST_FIT_DECREASING_3D,
         strategy_id=BEST_FIT_DECREASING_3D,
         strategy=None,
         db=db,
+        agency_id=agency_id,
+        actor_user_id=actor_user_id,
     )
 
 
-def run_backtracking_logistic(request: RunRequest, db: Session | None = None) -> SimulationResponse:
+def run_backtracking_logistic(
+    request: RunRequest, db: Session | None = None, agency_id: int | None = None,
+    actor_user_id: int | None = None,
+) -> SimulationResponse:
     return _run_logistic_simulation(
         request,
         algorithm=BACKTRACKING_LOGISTIC,
         runner=backtracking_3d_algorithm,
         db=db,
+        agency_id=agency_id,
+        actor_user_id=actor_user_id,
     )
 
 
-def run_minimax_maximin(request: RunRequest, db: Session | None = None) -> SimulationResponse:
+def run_minimax_maximin(
+    request: RunRequest, db: Session | None = None, agency_id: int | None = None,
+    actor_user_id: int | None = None,
+) -> SimulationResponse:
     strategy = (request.strategy or MINIMAX).upper()
     if strategy not in {MINIMAX, MAXIMIN}:
         strategy = MINIMAX
@@ -101,6 +123,8 @@ def run_minimax_maximin(request: RunRequest, db: Session | None = None) -> Simul
         strategy_id=strategy,
         strategy=strategy,
         db=db,
+        agency_id=agency_id,
+        actor_user_id=actor_user_id,
     )
 
 
@@ -111,6 +135,8 @@ def _run_simulation(
     strategy_id: str,
     strategy: str | None,
     db: Session | None = None,
+    agency_id: int | None = None,
+    actor_user_id: int | None = None,
 ) -> SimulationResponse:
     truck_schema = get_truck(request.truck_id)
     if not truck_schema:
@@ -118,10 +144,12 @@ def _run_simulation(
 
     truck = build_truck(truck_schema)
     packing_algorithm = get_packing_algorithm(strategy_id)
-    source_packages = packages_from_request(request, db=db)
+    source_packages = packages_from_request(request, db=db, agency_id=agency_id)
     if db is not None:
         for package in source_packages:
-            start_service_phase(db, "carga", encomienda_id=package.id)
+            start_service_phase(
+                db, "carga", encomienda_id=package.id, usuario_id=actor_user_id
+            )
     packages = packing_algorithm.order_packages(
         [package for package in source_packages if package.requires_packing]
     )
@@ -198,20 +226,20 @@ def build_packages(packages: list[Package]) -> list[Package3D]:
     return [package if isinstance(package, Package3D) else Package3D.from_schema(package) for package in packages]
 
 
-def packages_from_request(request: RunRequest, db: Session | None = None) -> list[Package3D]:
+def packages_from_request(request: RunRequest, db: Session | None = None, agency_id: int | None = None) -> list[Package3D]:
     if request.package_codes:
         packages = (
-            list_registered_packages_by_codes(db, request.package_codes)
+            list_registered_packages_by_codes(db, request.package_codes, agency_id=agency_id)
             if db is not None
             else list_packages_by_codes(request.package_codes)
         )
         return build_packages(packages)
-    return build_packages(_source_packages(limit=request.package_limit, db=db))
+    return build_packages(_source_packages(limit=request.package_limit, db=db, agency_id=agency_id))
 
 
-def _source_packages(limit: int | None, db: Session | None) -> list[Package]:
+def _source_packages(limit: int | None, db: Session | None, agency_id: int | None = None) -> list[Package]:
     if db is not None:
-        return list_registered_packages(db, limit=limit)
+        return list_registered_packages(db, limit=limit, agency_id=agency_id)
     return list_packages(limit=limit or 70, shuffled=False)
 
 
@@ -221,13 +249,20 @@ def _run_logistic_simulation(
     algorithm: str,
     runner,
     db: Session | None = None,
+    agency_id: int | None = None,
+    actor_user_id: int | None = None,
 ) -> SimulationResponse:
     truck_schema = get_truck(request.truck_id)
     if not truck_schema:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Camion no encontrado para la PoC.")
 
     truck = build_truck(truck_schema)
-    source_packages = packages_from_request(request, db=db)
+    source_packages = packages_from_request(request, db=db, agency_id=agency_id)
+    if db is not None:
+        for package in source_packages:
+            start_service_phase(
+                db, "carga", encomienda_id=package.id, usuario_id=actor_user_id
+            )
     packages = [package for package in source_packages if package.requires_packing]
     result = runner(
         truck,

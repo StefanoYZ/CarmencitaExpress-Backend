@@ -1,6 +1,8 @@
 from sqlalchemy.orm import Session
+import pytest
 
 from app.modules.clients.model import Client
+from app.modules.claims.model import ShipmentTraceEvent
 from app.modules.shipments.constants import (
     CANCELED_STATUS,
     DELIVERED_STATUS,
@@ -8,6 +10,11 @@ from app.modules.shipments.constants import (
     REGISTERED_STATUS,
 )
 from app.modules.shipments.model import Shipment
+
+
+@pytest.fixture(autouse=True)
+def authenticated_client(api_client, admin_headers):
+    api_client.headers.update(admin_headers)
 
 
 def test_pre_registration_confirmation_and_clients(
@@ -42,10 +49,19 @@ def test_registered_shipment_tracking_label_and_delivery(
     assert created.status_code == 201, created.text
     shipment = created.json()
 
+    updated_payload = {**valid_shipment_payload, "descripcion": "Paquete QA actualizado"}
+    updated_payload.pop("aviso_privacidad_aceptado")
+    updated_payload.pop("version_aviso_privacidad")
+    updated = api_client.put(f"/api/v1/encomiendas/{shipment['id']}", json=updated_payload)
+    assert updated.status_code == 200, updated.text
+    quote = api_client.post("/api/v1/cotizaciones/calcular", json={"encomienda_id": shipment["id"]})
+    assert quote.status_code == 200, quote.text
+
     by_code = api_client.get(
         f"/api/v1/encomiendas/codigo/{shipment['codigo_encomienda']}"
     )
     assert by_code.status_code == 200
+    assert all("actor_name" not in event for event in by_code.json()["trazabilidad"])
 
     label = api_client.get(f"/api/v1/encomiendas/{shipment['id']}/etiqueta")
     assert label.status_code == 200
@@ -73,6 +89,17 @@ def test_registered_shipment_tracking_label_and_delivery(
     persisted = db_session.query(Shipment).filter_by(id=shipment["id"]).one()
     assert persisted.status == DELIVERED_STATUS
     assert persisted.sender_name == "TEST QA REMITENTE"
+    events = (
+        db_session.query(ShipmentTraceEvent)
+        .filter(ShipmentTraceEvent.shipment_id == shipment["id"])
+        .all()
+    )
+    actor_by_type = {event.event_type: event.actor_name for event in events}
+    assert actor_by_type["REGISTRADA"] == "TEST QA ADMIN_GENERAL"
+    assert actor_by_type["ACTUALIZADA"] == "TEST QA ADMIN_GENERAL"
+    assert actor_by_type["COTIZADA"] == "TEST QA ADMIN_GENERAL"
+    assert actor_by_type["REGISTRO_INICIADA"] == "TEST QA ADMIN_GENERAL"
+    assert actor_by_type["ENTREGADA"] == "TEST QA ADMIN_GENERAL"
 
 
 def test_cancel_shipment_blocks_label(api_client, valid_shipment_payload):

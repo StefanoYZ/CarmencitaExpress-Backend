@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.dependencies import require_permission
+from app.modules.agencies.service import get_scoped_shipment, is_global_admin, list_scoped_shipments
 from app.modules.shipments.reports import (
     generate_operational_report_excel,
     generate_operational_report_pdf,
@@ -20,8 +21,10 @@ from app.modules.shipments.schema import (
     ShipmentLabelResponse,
     ShipmentPreRegistrationCreate,
     ShipmentPreRegistrationResponse,
+    PrivacyNoticeResponse,
     ShipmentResponse,
     ShipmentUpdate,
+    PUBLIC_PRIVACY_NOTICE_VERSION,
 )
 from app.modules.shipments.service import (
     cancel_shipment,
@@ -39,14 +42,29 @@ from app.modules.shipments.service import (
     mark_as_delivered,
     update_shipment,
 )
+from app.modules.claims.model import ShipmentTraceEvent
 
 
 router = APIRouter(prefix="/encomiendas", tags=["shipments"])
 
 
 @router.post("", response_model=ShipmentResponse, status_code=status.HTTP_201_CREATED)
-def create_shipment_endpoint(payload: ShipmentCreate, db: Session = Depends(get_db)) -> ShipmentResponse:
-    return create_shipment(db, payload)
+def create_shipment_endpoint(
+    payload: ShipmentCreate,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_permission("encomiendas.write")),
+) -> ShipmentResponse:
+    return create_shipment(
+        db, payload, agency_id=current_user.agency_id, actor_user_id=current_user.id
+    )
+
+
+@router.get("/aviso-privacidad", response_model=PrivacyNoticeResponse)
+def get_public_privacy_notice() -> PrivacyNoticeResponse:
+    return PrivacyNoticeResponse(
+        version=PUBLIC_PRIVACY_NOTICE_VERSION,
+        text="CARMENCITA EXPRESS CARGO S.A.C. (RUC 20609708850) tratará los datos del remitente y destinatario necesarios para registrar, gestionar, transportar y entregar el envío solicitado. La información se almacena en la base de datos de la empresa conforme a la Ley N.° 29733 y su reglamento.",
+    )
 
 
 @router.post(
@@ -68,9 +86,21 @@ def create_pre_registration_endpoint(
     )
 
 
+@router.post("/registro-publico", response_model=ShipmentResponse, status_code=status.HTTP_201_CREATED)
+def create_public_shipment_endpoint(
+    payload: ShipmentPreRegistrationCreate,
+    db: Session = Depends(get_db),
+) -> ShipmentResponse:
+    """Registro público informado; no acepta un id de agencia enviado por el cliente."""
+    return create_shipment(db, payload, privacy_channel="PUBLIC_WEB")
+
+
 @router.get("", response_model=list[ShipmentResponse])
-def list_shipments_endpoint(db: Session = Depends(get_db)) -> list[ShipmentResponse]:
-    return list_shipments(db)
+def list_shipments_endpoint(
+    db: Session = Depends(get_db),
+    current_user=Depends(require_permission("encomiendas.read")),
+) -> list[ShipmentResponse]:
+    return list_scoped_shipments(db, current_user)
 
 
 @router.get("/reportes/operativo.pdf")
@@ -79,13 +109,14 @@ def export_operational_report_pdf_endpoint(
     estado: str | None = Query(default=None),
     texto: str | None = Query(default=None),
     db: Session = Depends(get_db),
-    _current_user=Depends(require_permission("encomiendas.read")),
+    current_user=Depends(require_permission("encomiendas.read")),
 ) -> Response:
     content = generate_operational_report_pdf(
         db,
         report_date=fecha,
         status=estado,
         search=texto,
+        agency_id=None if is_global_admin(current_user) else current_user.agency_id,
     )
     return Response(
         content=content,
@@ -100,13 +131,14 @@ def export_operational_report_excel_endpoint(
     estado: str | None = Query(default=None),
     texto: str | None = Query(default=None),
     db: Session = Depends(get_db),
-    _current_user=Depends(require_permission("encomiendas.read")),
+    current_user=Depends(require_permission("encomiendas.read")),
 ) -> Response:
     content = generate_operational_report_excel(
         db,
         report_date=fecha,
         status=estado,
         search=texto,
+        agency_id=None if is_global_admin(current_user) else current_user.agency_id,
     )
     return Response(
         content=content,
@@ -115,17 +147,54 @@ def export_operational_report_excel_endpoint(
     )
 
 
-@router.get("/codigo/{codigo_encomienda}", response_model=ShipmentResponse)
-def get_shipment_by_code_endpoint(codigo_encomienda: str, db: Session = Depends(get_db)) -> ShipmentResponse:
+@router.get("/codigo/{codigo_encomienda}")
+def get_public_shipment_status_endpoint(codigo_encomienda: str, db: Session = Depends(get_db)) -> dict:
     shipment = get_shipment_by_code(db, codigo_encomienda)
     if shipment is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shipment not found")
+    events = (
+        db.query(ShipmentTraceEvent)
+        .filter(ShipmentTraceEvent.shipment_id == shipment.id, ShipmentTraceEvent.visible_to_customer.is_(True))
+        .order_by(ShipmentTraceEvent.created_at.asc())
+        .all()
+    )
+    return {
+        "codigo_encomienda": shipment.shipment_code,
+        "origen": shipment.origin,
+        "destino": shipment.destination,
+        "estado": shipment.status,
+        "trazabilidad": [
+            {
+                "evento": event.event_type,
+                "estado": event.status,
+                "lugar": event.location,
+                "detalle": event.description,
+                "fecha": event.created_at,
+            }
+            for event in events
+        ],
+    }
+
+
+@router.get("/interno/codigo/{codigo_encomienda}", response_model=ShipmentResponse)
+def get_internal_shipment_by_code_endpoint(
+    codigo_encomienda: str,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_permission("encomiendas.read")),
+) -> ShipmentResponse:
+    shipment = get_shipment_by_code(db, codigo_encomienda)
+    if shipment is None or (not is_global_admin(current_user) and shipment.agency_id != current_user.agency_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shipment not found")
     return shipment
 
 
 @router.get("/{encomienda_id}", response_model=ShipmentResponse)
-def get_shipment_endpoint(encomienda_id: int, db: Session = Depends(get_db)) -> ShipmentResponse:
-    shipment = get_shipment(db, encomienda_id)
+def get_shipment_endpoint(
+    encomienda_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_permission("encomiendas.read")),
+) -> ShipmentResponse:
+    shipment = get_scoped_shipment(db, encomienda_id, current_user)
     if shipment is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shipment not found")
     return shipment
@@ -136,10 +205,14 @@ def confirm_pre_registration_endpoint(
     encomienda_id: int,
     payload: ConfirmPreRegistrationRequest | None = Body(default=None),
     db: Session = Depends(get_db),
+    current_user=Depends(require_permission("encomiendas.update")),
 ) -> ShipmentResponse:
+    if get_scoped_shipment(db, encomienda_id, current_user) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shipment not found")
     try:
         shipment = confirm_pre_registration(
-            db, encomienda_id, base_orientation=payload.base_orientation if payload else None
+            db, encomienda_id, base_orientation=payload.base_orientation if payload else None,
+            actor_user_id=current_user.id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
@@ -153,9 +226,12 @@ def update_shipment_endpoint(
     encomienda_id: int,
     payload: ShipmentUpdate,
     db: Session = Depends(get_db),
+    current_user=Depends(require_permission("encomiendas.update")),
 ) -> ShipmentResponse:
+    if get_scoped_shipment(db, encomienda_id, current_user) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shipment not found")
     try:
-        shipment = update_shipment(db, encomienda_id, payload)
+        shipment = update_shipment(db, encomienda_id, payload, actor_user_id=current_user.id)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     if shipment is None:
@@ -168,9 +244,14 @@ def cancel_shipment_with_reason_endpoint(
     encomienda_id: int,
     payload: ShipmentCancelRequest,
     db: Session = Depends(get_db),
+    current_user=Depends(require_permission("encomiendas.cancel")),
 ) -> ShipmentDeleteResponse:
+    if get_scoped_shipment(db, encomienda_id, current_user) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shipment not found")
     try:
-        shipment = cancel_shipment_with_reason(db, encomienda_id, payload.reason)
+        shipment = cancel_shipment_with_reason(
+            db, encomienda_id, payload.reason, actor_user_id=current_user.id
+        )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     if shipment is None:
@@ -185,10 +266,14 @@ def cancel_shipment_with_reason_endpoint(
 def delete_expired_pre_registration_endpoint(
     encomienda_id: int,
     db: Session = Depends(get_db),
-    _current_user=Depends(require_permission("encomiendas.write")),
+    current_user=Depends(require_permission("encomiendas.write")),
 ) -> ShipmentDeleteResponse:
+    if get_scoped_shipment(db, encomienda_id, current_user) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shipment not found")
     try:
-        shipment = delete_expired_pre_registration(db, encomienda_id)
+        shipment = delete_expired_pre_registration(
+            db, encomienda_id, actor_user_id=current_user.id
+        )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     if shipment is None:
@@ -197,9 +282,15 @@ def delete_expired_pre_registration_endpoint(
 
 
 @router.delete("/{encomienda_id}", response_model=ShipmentDeleteResponse)
-def cancel_shipment_endpoint(encomienda_id: int, db: Session = Depends(get_db)) -> ShipmentDeleteResponse:
+def cancel_shipment_endpoint(
+    encomienda_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_permission("encomiendas.cancel")),
+) -> ShipmentDeleteResponse:
+    if get_scoped_shipment(db, encomienda_id, current_user) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shipment not found")
     try:
-        shipment = cancel_shipment(db, encomienda_id)
+        shipment = cancel_shipment(db, encomienda_id, actor_user_id=current_user.id)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     if shipment is None:
@@ -208,7 +299,13 @@ def cancel_shipment_endpoint(encomienda_id: int, db: Session = Depends(get_db)) 
 
 
 @router.get("/{encomienda_id}/etiqueta", response_model=ShipmentLabelResponse)
-def get_label_data_endpoint(encomienda_id: int, db: Session = Depends(get_db)) -> ShipmentLabelResponse:
+def get_label_data_endpoint(
+    encomienda_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_permission("etiquetas.read")),
+) -> ShipmentLabelResponse:
+    if get_scoped_shipment(db, encomienda_id, current_user) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shipment not found")
     try:
         label = get_label_data(db, encomienda_id)
     except ValueError as exc:
@@ -219,7 +316,13 @@ def get_label_data_endpoint(encomienda_id: int, db: Session = Depends(get_db)) -
 
 
 @router.get("/{encomienda_id}/etiqueta/qr")
-def get_label_qr_endpoint(encomienda_id: int, db: Session = Depends(get_db)) -> Response:
+def get_label_qr_endpoint(
+    encomienda_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_permission("etiquetas.generate")),
+) -> Response:
+    if get_scoped_shipment(db, encomienda_id, current_user) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shipment not found")
     try:
         png_bytes = generate_label_qr_png(db, encomienda_id)
     except ValueError as exc:
@@ -232,7 +335,13 @@ def get_label_qr_endpoint(encomienda_id: int, db: Session = Depends(get_db)) -> 
 
 
 @router.get("/{encomienda_id}/etiqueta/pdf")
-def get_label_pdf_endpoint(encomienda_id: int, db: Session = Depends(get_db)) -> Response:
+def get_label_pdf_endpoint(
+    encomienda_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_permission("etiquetas.generate")),
+) -> Response:
+    if get_scoped_shipment(db, encomienda_id, current_user) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shipment not found")
     try:
         result = generate_label_pdf(db, encomienda_id)
     except ValueError as exc:
@@ -254,9 +363,14 @@ def deliver_shipment_endpoint(
     encomienda_id: int,
     payload: DeliveryRequest,
     db: Session = Depends(get_db),
+    current_user=Depends(require_permission("tracking.update_status")),
 ) -> DeliveryResponse:
+    if get_scoped_shipment(db, encomienda_id, current_user) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shipment not found")
     try:
-        shipment = mark_as_delivered(db, encomienda_id, payload)
+        shipment = mark_as_delivered(
+            db, encomienda_id, payload, actor_user_id=current_user.id
+        )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     if shipment is None:

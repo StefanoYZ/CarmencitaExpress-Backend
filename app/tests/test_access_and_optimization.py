@@ -20,13 +20,20 @@ def test_estiba_cannot_access_users(api_client, estiba_headers):
 
 
 def test_admin_creates_and_toggles_user_without_email(api_client, admin_headers):
+    place = api_client.get("/api/v1/destinos").json()[0]
+    agency = api_client.post(
+        "/api/v1/agencias", headers=admin_headers, json={"destination_id": place["id"]}
+    )
+    assert agency.status_code == 201, agency.text
+    agency_id = agency.json()["id"]
     created = api_client.post(
-        "/api/v1/users",
+        f"/api/v1/agencias/{agency_id}/users",
         headers=admin_headers,
         json={
             "username": "qa_toggle",
             "password": "QaPassword123",
             "full_name": "TEST QA TOGGLE",
+            "role": "SECRETARIA",
         },
     )
     assert created.status_code == 201, created.text
@@ -35,7 +42,7 @@ def test_admin_creates_and_toggles_user_without_email(api_client, admin_headers)
     assert data["is_active"] is True
 
     disabled = api_client.put(
-        f"/api/v1/users/{data['id']}",
+        f"/api/v1/agencias/{agency_id}/users/{data['id']}",
         headers=admin_headers,
         json={"is_active": False},
     )
@@ -43,7 +50,7 @@ def test_admin_creates_and_toggles_user_without_email(api_client, admin_headers)
     assert disabled.json()["is_active"] is False
 
     enabled = api_client.put(
-        f"/api/v1/users/{data['id']}",
+        f"/api/v1/agencias/{agency_id}/users/{data['id']}",
         headers=admin_headers,
         json={"is_active": True},
     )
@@ -93,6 +100,7 @@ def test_all_optimization_algorithms_are_enabled(
 
 def test_best_fit_decreasing_uses_registered_shipments_and_skips_envelopes(
     api_client,
+    secretaria_headers,
     estiba_headers,
     valid_shipment_payload,
 ):
@@ -107,7 +115,7 @@ def test_best_fit_decreasing_uses_registered_shipments_and_skips_envelopes(
             "alto_cm": 15 + index,
             "orientacion_base": "LARGO_ANCHO",
         }
-        created = api_client.post("/api/v1/encomiendas", json=payload)
+        created = api_client.post("/api/v1/encomiendas", headers=secretaria_headers, json=payload)
         assert created.status_code == 201, created.text
 
     envelope_payload = {
@@ -120,7 +128,7 @@ def test_best_fit_decreasing_uses_registered_shipments_and_skips_envelopes(
         "ancho_cm": 0,
         "alto_cm": 0,
     }
-    envelope = api_client.post("/api/v1/encomiendas", json=envelope_payload)
+    envelope = api_client.post("/api/v1/encomiendas", headers=secretaria_headers, json=envelope_payload)
     assert envelope.status_code == 201, envelope.text
     envelope_code = envelope.json()["codigo_encomienda"]
 
@@ -151,6 +159,7 @@ def test_best_fit_decreasing_uses_registered_shipments_and_skips_envelopes(
 
 def test_run_with_package_codes_filters_selected_shipments(
     api_client,
+    secretaria_headers,
     estiba_headers,
     valid_shipment_payload,
 ):
@@ -168,7 +177,7 @@ def test_run_with_package_codes_filters_selected_shipments(
             "alto_cm": 15 + index,
             "orientacion_base": "LARGO_ANCHO",
         }
-        created = api_client.post("/api/v1/encomiendas", json=payload)
+        created = api_client.post("/api/v1/encomiendas", headers=secretaria_headers, json=payload)
         assert created.status_code == 201, created.text
         codes.append(created.json()["codigo_encomienda"])
 

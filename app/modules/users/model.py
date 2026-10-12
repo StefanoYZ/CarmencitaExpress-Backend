@@ -29,6 +29,7 @@ class InternalUser(Base):
     password_hash = Column(String(255), nullable=False)
     full_name = Column(String(150), nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
+    agency_id = Column(Integer, ForeignKey("agencias.id"), index=True, nullable=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at = Column(
         DateTime(timezone=True),

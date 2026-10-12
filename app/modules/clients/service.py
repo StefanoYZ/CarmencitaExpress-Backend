@@ -1,8 +1,10 @@
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 
 from app.modules.clients import repository
 from app.modules.clients.model import Client
 from app.modules.clients.schema import ClientCreate, ClientUpdate, ClientUpsert
+from app.modules.shipments.model import Shipment
 
 
 def get_client_by_dni(db: Session, dni: str) -> Client | None:
@@ -11,6 +13,37 @@ def get_client_by_dni(db: Session, dni: str) -> Client | None:
 
 def list_clients(db: Session) -> list[Client]:
     return repository.list_clients(db)
+
+
+def get_client_by_dni_for_agency(db: Session, dni: str, agency_id: int) -> Client | None:
+    client = get_client_by_dni(db, dni)
+    if client is None:
+        return None
+    shipment_exists = db.query(Shipment.id).filter(
+        Shipment.agency_id == agency_id,
+        or_(
+            Shipment.sender_document_number == dni,
+            Shipment.recipient_document_number == dni,
+        ),
+    ).first()
+    return client if shipment_exists else None
+
+
+def list_clients_for_agency(db: Session, agency_id: int) -> list[Client]:
+    return (
+        db.query(Client)
+        .join(
+            Shipment,
+            or_(
+                Shipment.sender_document_number == Client.dni,
+                Shipment.recipient_document_number == Client.dni,
+            ),
+        )
+        .filter(Shipment.agency_id == agency_id)
+        .order_by(Client.updated_at.desc())
+        .distinct()
+        .all()
+    )
 
 
 def create_or_update_client(db: Session, payload: ClientCreate) -> Client:

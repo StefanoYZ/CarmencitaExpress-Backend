@@ -5,6 +5,8 @@ from app.core.database import database_is_ready
 from app.core.config import settings
 from app.db_bootstrap import bootstrap_database
 from app.modules.auth.router import router as auth_router
+from app.modules.agencies.router import router as agencies_router
+from app.modules.claims.router import router as claims_router
 from app.modules.clients.router import router as clients_router
 from app.modules.charge_logs.router import router as charge_logs_router
 from app.modules.destinations.router import router as destinations_router
@@ -40,6 +42,8 @@ app.add_middleware(
 )
 
 app.include_router(clients_router, prefix=settings.api_prefix)
+app.include_router(agencies_router, prefix=settings.api_prefix)
+app.include_router(claims_router, prefix=settings.api_prefix)
 app.include_router(charge_logs_router, prefix=settings.api_prefix)
 app.include_router(destinations_router, prefix=settings.api_prefix)
 app.include_router(auth_router, prefix=settings.api_prefix)

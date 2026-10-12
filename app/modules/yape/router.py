@@ -3,7 +3,13 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.modules.integration_settings.service import mercadopago_flow_enabled
-from app.modules.measurement_logs.service import ensure_boleta_log_after_payment, finish_service_phase
+from app.modules.measurement_logs.service import (
+    ensure_boleta_log_after_payment,
+    finish_service_phase,
+    resolve_user_from_authorization,
+)
+from app.modules.shipments.service import get_shipment
+from app.modules.shipments.tracing import append_shipment_trace_event
 from app.modules.charge_logs.service import (
     FAILED_RESULT,
     YAPE_MODALITY,
@@ -28,6 +34,7 @@ def process_yape_payment(
         extract_user_from_payload(data)
         or extract_user_from_authorization_header(authorization)
     )
+    authenticated_user = resolve_user_from_authorization(db, authorization)
 
     try:
         result = procesar_pago_yape(data) if mercadopago_flow_enabled(db) else simular_pago_yape(data)
@@ -57,9 +64,24 @@ def process_yape_payment(
         shipment_id = int(data["encomienda_id"])
         payment_id = int(result["id"]) if result.get("id") else None
         try:
-            finish_service_phase(db, "registro", encomienda_id=shipment_id, pago_id=payment_id)
+            finish_service_phase(
+                db, "registro", encomienda_id=shipment_id, pago_id=payment_id,
+                usuario_id=authenticated_user.id if authenticated_user else None,
+            )
         except (LookupError, ValueError):
             pass
+        shipment = get_shipment(db, shipment_id)
+        if shipment is not None:
+            append_shipment_trace_event(
+                db,
+                shipment,
+                event_type="PAGO_APROBADO",
+                description="El pago del envío fue aprobado.",
+                actor=authenticated_user,
+                source="INTERNO" if authenticated_user else "PUBLIC_WEB",
+                visible_to_customer=True,
+            )
+            db.commit()
         ensure_boleta_log_after_payment(
             db,
             encomienda_id=shipment_id,

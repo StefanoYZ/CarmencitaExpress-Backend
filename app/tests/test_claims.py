@@ -1,0 +1,185 @@
+from fastapi.testclient import TestClient
+
+def _create_public_shipment(client: TestClient, payload: dict) -> dict:
+    response = client.post("/api/v1/encomiendas/registro-publico", json=payload)
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+def test_public_claim_validates_shipment_party_and_returns_safe_status(
+    api_client: TestClient,
+    valid_shipment_payload: dict,
+) -> None:
+    shipment = _create_public_shipment(api_client, valid_shipment_payload)
+    sender_lookup = api_client.get(
+        f"/api/v1/reclamos/publicos/encomiendas/{shipment['codigo_encomienda']}/remitente"
+    )
+    assert sender_lookup.status_code == 200, sender_lookup.text
+    assert sender_lookup.json() == {
+        "shipment_code": shipment["codigo_encomienda"],
+        "sender_document_type": "DNI",
+        "sender_document_number": valid_shipment_payload["remitente_numero_documento"],
+    }
+    agencies = api_client.get("/api/v1/reclamos/agencias").json()
+    assert agencies
+    assert all("admin" not in agency and "agency_admin" not in agency for agency in agencies)
+
+    payload = {
+        "shipment_code": shipment["codigo_encomienda"],
+        "document_number": valid_shipment_payload["remitente_numero_documento"],
+        "agency_id": agencies[0]["id"],
+        "category": "DANO",
+        "description": "El paquete llegó con la caja dañada.",
+        "requested_solution": "Solicito que revisen el caso.",
+        "privacy_notice_accepted": True,
+        "privacy_notice_version": "2026-10-11",
+    }
+    created = api_client.post("/api/v1/reclamos/publicos", json=payload)
+    assert created.status_code == 201, created.text
+    assert created.json()["status"] == "RECIBIDO"
+
+    invalid_party = api_client.post("/api/v1/reclamos/publicos", json={**payload, "document_number": "11111111"})
+    assert invalid_party.status_code == 404
+
+    status_response = api_client.post("/api/v1/reclamos/consulta", json={
+        "case_code": created.json()["case_code"],
+        "shipment_code": shipment["codigo_encomienda"],
+        "document_number": payload["document_number"],
+    })
+    assert status_response.status_code == 200, status_response.text
+    assert status_response.json()["case_code"] == created.json()["case_code"]
+    assert "claimant_name" not in status_response.json()
+    assert all("actor_name" not in event for event in status_response.json()["events"])
+    assert all("actor_name" not in event for event in status_response.json()["shipment_events"])
+
+
+def test_monetary_claim_requires_image_and_admin_verification(
+    api_client: TestClient,
+    admin_headers: dict[str, str],
+    valid_shipment_payload: dict,
+) -> None:
+    shipment = _create_public_shipment(api_client, valid_shipment_payload)
+    agency = api_client.get("/api/v1/reclamos/agencias").json()[0]
+    agency_admin_user = api_client.post(
+        f"/api/v1/agencias/{agency['id']}/agency-admin",
+        headers=admin_headers,
+        json={"username": "claim_verifier", "password": "QaPassword123", "full_name": "Claim Verifier"},
+    )
+    assert agency_admin_user.status_code == 200, agency_admin_user.text
+    login = api_client.post("/api/v1/auth/login", json={"username": "claim_verifier", "password": "QaPassword123"})
+    assert login.status_code == 200, login.text
+    agency_headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    created = api_client.post("/api/v1/reclamos/publicos", json={
+        "shipment_code": shipment["codigo_encomienda"],
+        "document_number": valid_shipment_payload["remitente_numero_documento"],
+        "agency_id": agency["id"],
+        "category": "DANO",
+        "description": "El artículo llegó dañado y no funciona.",
+        "privacy_notice_accepted": True,
+        "privacy_notice_version": "2026-10-11",
+    })
+    assert created.status_code == 201, created.text
+
+    assert api_client.get("/api/v1/reclamos", headers=admin_headers).status_code == 400
+    claims = api_client.get("/api/v1/reclamos", headers=agency_headers).json()
+    claim = next(item for item in claims if item["case_code"] == created.json()["case_code"])
+    scoped_admin_detail = api_client.get(
+        f"/api/v1/reclamos/{claim['id']}", headers=admin_headers, params={"agency_id": agency["id"]}
+    )
+    assert scoped_admin_detail.status_code == 200
+    assert api_client.get(f"/api/v1/reclamos/{claim['id']}", headers=admin_headers).status_code == 404
+    for target in ("EN_REVISION", "INVESTIGANDO"):
+        event = api_client.post(f"/api/v1/reclamos/{claim['id']}/eventos", headers=agency_headers, params={"agency_id": agency["id"]}, json={
+            "note": "Se revisa la trazabilidad de la encomienda.", "to_status": target,
+        })
+        assert event.status_code == 200, event.text
+        assert event.json()["actor_name"] == "Claim Verifier"
+
+    no_proof = api_client.post(f"/api/v1/reclamos/{claim['id']}/resolucion", headers=admin_headers, params={"agency_id": agency["id"]}, json={
+        "resolution_type": "MONETARIA", "resolution_text": "Se realizará la devolución.",
+        "amount": 25, "currency": "PEN", "payment_method": "YAPE",
+    })
+    assert no_proof.status_code == 422
+
+    png = b"\x89PNG\r\n\x1a\n" + b"claim-proof"
+    attachment = api_client.post(
+        f"/api/v1/reclamos/{claim['id']}/adjuntos",
+        headers={**agency_headers, "Content-Type": "image/png", "X-Tipo-Adjunto": "COMPROBANTE_PAGO", "X-Nombre-Archivo": "pago.png"},
+        params={"agency_id": agency["id"]},
+        content=png,
+    )
+    assert attachment.status_code == 201, attachment.text
+    resolution = api_client.post(f"/api/v1/reclamos/{claim['id']}/resolucion", headers=agency_headers, params={"agency_id": agency["id"]}, json={
+        "resolution_type": "MONETARIA", "resolution_text": "Se realizó el abono al cliente.",
+        "amount": 25, "currency": "PEN", "payment_method": "YAPE",
+        "payment_proof_attachment_id": attachment.json()["id"],
+    })
+    assert resolution.status_code == 200, resolution.text
+    assert resolution.json()["status"] == "PAGO_POR_VERIFICAR"
+    assert resolution.json()["resolution_recorded_by_name"] == "Claim Verifier"
+
+    verified = api_client.post(f"/api/v1/reclamos/{claim['id']}/verificar-pago", headers=agency_headers, params={"agency_id": agency["id"]},
+                               json={"verified": True, "note": "Comprobante revisado."})
+    assert verified.status_code == 200, verified.text
+    assert verified.json()["status"] == "RESUELTO"
+    assert verified.json()["payment_verified_at"] is not None
+    assert verified.json()["payment_verified_by_name"] == "Claim Verifier"
+    assert verified.json()["resolved_by_name"] == "Claim Verifier"
+
+
+def test_secretaria_can_open_an_in_person_case_in_her_agency(
+    api_client: TestClient,
+    db_session,
+    secretaria_headers: dict[str, str],
+    valid_shipment_payload: dict,
+) -> None:
+    from app.modules.users.repository import get_user_by_username
+
+    secretary = get_user_by_username(db_session, "qa_secretaria")
+    shipment_payload = {**valid_shipment_payload, "remitente_numero_documento": "70121111"}
+    shipment = api_client.post("/api/v1/encomiendas", headers=secretaria_headers, json=shipment_payload)
+    assert shipment.status_code == 201, shipment.text
+    sender_lookup_path = (
+        f"/api/v1/reclamos/agencia/{secretary.agency_id}/encomiendas/"
+        f"{shipment.json()['codigo_encomienda']}/remitente"
+    )
+    assert api_client.get(sender_lookup_path).status_code == 401
+    sender_lookup = api_client.get(sender_lookup_path, headers=secretaria_headers)
+    assert sender_lookup.status_code == 200, sender_lookup.text
+    assert sender_lookup.json() == {
+        "shipment_code": shipment.json()["codigo_encomienda"],
+        "sender_document_type": "DNI",
+        "sender_document_number": "70121111",
+    }
+    wrong_agency_lookup = api_client.get(
+        f"/api/v1/reclamos/agencia/{secretary.agency_id + 1000}/encomiendas/"
+        f"{shipment.json()['codigo_encomienda']}/remitente",
+        headers=secretaria_headers,
+    )
+    assert wrong_agency_lookup.status_code == 404
+    response = api_client.post("/api/v1/reclamos/presencial", headers=secretaria_headers, json={
+        "shipment_code": shipment.json()["codigo_encomienda"],
+        "claimant_document_number": "70121111",
+        "category": "FALTANTE",
+        "description": "El cliente reporta que falta un artículo en el paquete.",
+        "privacy_notice_acknowledged": True,
+    })
+    assert response.status_code == 201, response.text
+    assert response.json()["source"] == "PRESENCIAL"
+    assert response.json()["agency_id"] == secretary.agency_id
+    forbidden_resolution = api_client.post(
+        f"/api/v1/reclamos/{response.json()['id']}/resolucion",
+        headers=secretaria_headers,
+        params={"agency_id": secretary.agency_id},
+        json={"resolution_type": "NO_MONETARIA", "resolution_text": "Se resolvió el caso presencialmente."},
+    )
+    assert forbidden_resolution.status_code == 403
+
+    trace = api_client.post(
+        f"/api/v1/reclamos/agencia/{secretary.agency_id}/encomiendas/{shipment.json()['id']}/trazabilidad",
+        headers=secretaria_headers,
+        json={"event_type": "INCIDENCIA", "location": "Agencia de origen", "description": "Se inspeccionó el paquete."},
+    )
+    assert trace.status_code == 200, trace.text
+    assert trace.json()["lugar"] == "Agencia de origen"
+    assert trace.json()["actor_name"] == "TEST QA SECRETARIA"

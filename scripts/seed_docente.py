@@ -1,7 +1,7 @@
 """Crea/actualiza los usuarios de evaluacion asincrona.
 
 - Ejecuta seed_initial_access_control (asegura roles/permisos y QUITA developer.*
-  del rol ADMINISTRADOR).
+  del rol ADMIN_GENERAL).
 - Crea los usuarios del docente: administrador (sin developer), secretaria y
   estibador. Ademas deja un usuario DEVELOPER aparte para el equipo (no se entrega
   al docente).
@@ -18,7 +18,7 @@ from app.modules.users.service import seed_initial_access_control
 
 # (username, password, full_name, rol)
 USERS = [
-    ("docente_admin",      "Docente2025", "Docente Administrador", "ADMINISTRADOR"),
+    ("docente_admin",      "Docente2025", "Docente Administrador", "ADMIN_GENERAL"),
     ("docente_secretaria", "Docente2025", "Docente Secretaria",    "SECRETARIA"),
     ("docente_estiba",     "Docente2025", "Docente Estibador",     "ESTIBA"),
     # Usuario del EQUIPO para la vista Developer (NO se entrega al docente):
@@ -59,7 +59,7 @@ def main():
     db = SessionLocal()
     try:
         seed_initial_access_control(db)
-        print("Roles/permisos sincronizados (developer.* retirado de ADMINISTRADOR).", flush=True)
+        print("Roles/permisos sincronizados (developer.* retirado de ADMIN_GENERAL).", flush=True)
         for user in USERS:
             ensure_user(db, *user)
     finally:

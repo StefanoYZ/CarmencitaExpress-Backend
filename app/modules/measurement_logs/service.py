@@ -10,6 +10,8 @@ from sqlalchemy.orm import Session
 from app.core.business_time import business_now, business_today, ensure_business_tz
 from app.core.security import decode_access_token
 from app.modules.measurement_logs.model import LogCargaPaquete, LogEmisionBoleta, LogServicioTransporte
+from app.modules.shipments.model import Shipment
+from app.modules.shipments.tracing import append_shipment_trace_event
 from app.modules.users import repository as users_repository
 from app.modules.users.model import InternalUser
 
@@ -217,12 +219,16 @@ def start_service_phase(
         usuario_correo=usuario_correo,
     )
     start_field = _phase_start_field(phase)
+    phase_started = False
     if getattr(log, start_field) is None:
         started_at = timestamp_inicio or business_now()
         setattr(log, start_field, started_at)
+        phase_started = True
         if log.fecha is None:
             log.fecha = started_at.date()
     log.metodo = METODO_SISTEMA
+    if phase_started and encomienda_id is not None:
+        _append_shipment_phase_event(db, encomienda_id, phase, "INICIADA", usuario_id)
     if commit:
         db.add(log)
         db.commit()
@@ -254,12 +260,40 @@ def finish_service_phase(
         usuario_id=usuario_id,
         usuario_correo=usuario_correo,
     )
+    end_field = _phase_end_field(phase)
+    phase_finished = getattr(log, end_field) is None
     _finish_service_phase(log, phase, timestamp_fin or business_now())
+    if encomienda_id is not None and phase_finished:
+        _append_shipment_phase_event(db, encomienda_id, phase, "FINALIZADA", usuario_id)
     if commit:
         db.add(log)
         db.commit()
         db.refresh(log)
     return log
+
+
+def _append_shipment_phase_event(
+    db: Session,
+    shipment_id: int,
+    phase: Phase,
+    action: Literal["INICIADA", "FINALIZADA"],
+    actor_user_id: int | None,
+) -> None:
+    shipment = db.query(Shipment).filter(Shipment.id == shipment_id).first()
+    if shipment is None:
+        return
+    phase_labels = {"registro": "Registro", "carga": "Carga", "entrega": "Entrega"}
+    location = shipment.origin if phase == "registro" else shipment.destination if phase == "entrega" else None
+    append_shipment_trace_event(
+        db,
+        shipment,
+        actor_user_id=actor_user_id,
+        event_type=f"{phase.upper()}_{action}",
+        location=location,
+        description=f"Etapa de {phase_labels[phase].lower()} {action.lower()} registrada.",
+        source="INTERNO" if actor_user_id is not None else "SISTEMA",
+        visible_to_customer=True,
+    )
 
 
 def ensure_boleta_log_after_payment(
@@ -498,6 +532,7 @@ def iniciar_orden_carga(
     encomienda_ids: list[int],
     orden_carga_id: str | None = None,
     usuario_correo: str | None = None,
+    actor_user_id: int | None = None,
     actor_origen: str | None = "interno",
     canal: str | None = "interno",
     modo_prueba: bool = True,
@@ -528,6 +563,17 @@ def iniciar_orden_carga(
         db.flush()
         log.numero_observacion = log.id
         logs.append(log)
+        shipment = db.query(Shipment).filter(Shipment.id == enc_id).first()
+        if shipment is not None:
+            append_shipment_trace_event(
+                db,
+                shipment,
+                event_type="CARGA_ORDEN_INICIADA",
+                description="La encomienda fue agregada a una orden de carga.",
+                actor_user_id=actor_user_id,
+                source="INTERNO" if actor_user_id is not None else "SISTEMA",
+                visible_to_customer=True,
+            )
     db.commit()
     for log in logs:
         db.refresh(log)
@@ -539,6 +585,7 @@ def finalizar_paquete_carga(
     orden_carga_id: str,
     encomienda_id: int,
     *,
+    actor_user_id: int | None = None,
     timestamp_fin: datetime | None = None,
     accion_fin: str = "siguiente_simulado",
 ) -> tuple[LogCargaPaquete, LogCargaPaquete | None]:
@@ -562,6 +609,17 @@ def finalizar_paquete_carga(
     log.tiempo_carga_ms = _duration_ms(log.timestamp_inicio, fin)
     log.accion_fin = accion_fin
     db.add(log)
+    shipment = db.query(Shipment).filter(Shipment.id == encomienda_id).first()
+    if shipment is not None:
+        append_shipment_trace_event(
+            db,
+            shipment,
+            event_type="CARGA_PAQUETE_FINALIZADA",
+            description="Finalizó la gestión de carga de la encomienda.",
+            actor_user_id=actor_user_id,
+            source="INTERNO" if actor_user_id is not None else "SISTEMA",
+            visible_to_customer=True,
+        )
 
     # Actualizar inicio del siguiente paquete en la secuencia
     siguiente = (
@@ -576,6 +634,17 @@ def finalizar_paquete_carga(
         siguiente.timestamp_inicio = fin
         siguiente.accion_inicio = "fin_anterior"
         db.add(siguiente)
+        next_shipment = db.query(Shipment).filter(Shipment.id == siguiente.encomienda_id).first()
+        if next_shipment is not None:
+            append_shipment_trace_event(
+                db,
+                next_shipment,
+                event_type="CARGA_ORDEN_INICIADA",
+                description="Inició la gestión de carga según el orden de la operación.",
+                actor_user_id=actor_user_id,
+                source="INTERNO" if actor_user_id is not None else "SISTEMA",
+                visible_to_customer=True,
+            )
 
     db.commit()
     db.refresh(log)
