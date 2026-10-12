@@ -133,12 +133,27 @@ def test_secretaria_can_open_an_in_person_case_in_her_agency(
     secretaria_headers: dict[str, str],
     valid_shipment_payload: dict,
 ) -> None:
+    from app.modules.agencies.model import Agency
     from app.modules.users.repository import get_user_by_username
 
     secretary = get_user_by_username(db_session, "qa_secretaria")
-    shipment_payload = {**valid_shipment_payload, "remitente_numero_documento": "70121111"}
+    agency = db_session.get(Agency, secretary.agency_id)
+    shipment_payload = {
+        **valid_shipment_payload,
+        "remitente_numero_documento": "70121111",
+        "origen": agency.destination.name,
+    }
+    wrong_origin = api_client.post(
+        "/api/v1/encomiendas",
+        headers=secretaria_headers,
+        json={**shipment_payload, "origen": "Trujillo"},
+    )
+    assert wrong_origin.status_code == 400
     shipment = api_client.post("/api/v1/encomiendas", headers=secretaria_headers, json=shipment_payload)
     assert shipment.status_code == 201, shipment.text
+    secretary_shipments = api_client.get("/api/v1/encomiendas", headers=secretaria_headers)
+    assert secretary_shipments.status_code == 200, secretary_shipments.text
+    assert any(item["id"] == shipment.json()["id"] for item in secretary_shipments.json())
     sender_lookup_path = (
         f"/api/v1/reclamos/agencia/{secretary.agency_id}/encomiendas/"
         f"{shipment.json()['codigo_encomienda']}/remitente"

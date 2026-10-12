@@ -101,11 +101,13 @@ def create_pre_registration(
     *,
     privacy_accepted_at: datetime,
     privacy_channel: str,
+    agency_id: int | None = None,
 ) -> Shipment:
     shipment = Shipment(
         shipment_code=generate_shipment_code(db),
         status=PRE_REGISTERED_STATUS,
         registration_origin=EXTERNAL_REGISTRATION_ORIGIN,
+        agency_id=agency_id,
         privacy_notice_version=shipment_data.privacy_notice_version,
         privacy_accepted_at=privacy_accepted_at,
         privacy_channel=privacy_channel,
@@ -207,10 +209,13 @@ def mark_shipment_as_quoted(
 
 
 def confirm_pre_registration(
-    db: Session, shipment: Shipment, *, actor_user_id: int | None = None
+    db: Session, shipment: Shipment, *, actor_user_id: int | None = None,
+    agency_id: int | None = None,
 ) -> Shipment:
     shipment.status = REGISTERED_STATUS
     shipment.registration_origin = EXTERNAL_REGISTRATION_ORIGIN
+    if agency_id is not None:
+        shipment.agency_id = agency_id
     db.add(shipment)
     _add_trace_event(
         db, shipment, "REGISTRADA", shipment.origin, "El pre-registro se confirmó como encomienda.",
@@ -222,7 +227,12 @@ def confirm_pre_registration(
 
 
 def update_shipment(
-    db: Session, shipment: Shipment, payload: ShipmentUpdate, *, actor_user_id: int | None = None
+    db: Session,
+    shipment: Shipment,
+    payload: ShipmentUpdate,
+    *,
+    actor_user_id: int | None = None,
+    origin_agency_id: int | None = None,
 ) -> Shipment:
     update_data = payload.model_dump(exclude_unset=True)
     changed = False
@@ -232,6 +242,9 @@ def update_shipment(
         if getattr(shipment, field) != value:
             changed = True
         setattr(shipment, field, value)
+    if shipment.agency_id != origin_agency_id:
+        shipment.agency_id = origin_agency_id
+        changed = True
     db.add(shipment)
     if changed:
         _add_trace_event(

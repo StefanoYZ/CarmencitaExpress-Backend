@@ -6,7 +6,13 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.dependencies import require_permission
-from app.modules.agencies.service import get_scoped_shipment, is_global_admin, list_scoped_shipments
+from app.modules.agencies.service import (
+    get_agency_for_origin,
+    get_scoped_shipment,
+    is_business_user,
+    is_global_admin,
+    list_scoped_shipments,
+)
 from app.modules.shipments.reports import (
     generate_operational_report_excel,
     generate_operational_report_pdf,
@@ -54,8 +60,25 @@ def create_shipment_endpoint(
     db: Session = Depends(get_db),
     current_user=Depends(require_permission("encomiendas.write")),
 ) -> ShipmentResponse:
+    origin_agency = get_agency_for_origin(db, payload.origin)
+    if origin_agency is not None and not origin_agency.is_active:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="La agencia de origen está inactiva")
+    if is_business_user(current_user) and not is_global_admin(current_user):
+        if origin_agency is None or origin_agency.id != current_user.agency_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="El origen debe corresponder a la agencia asignada a tu usuario.",
+            )
+    elif origin_agency is None and current_user.agency_id is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El origen seleccionado no está vinculado a una agencia.",
+        )
     return create_shipment(
-        db, payload, agency_id=current_user.agency_id, actor_user_id=current_user.id
+        db,
+        payload,
+        agency_id=origin_agency.id if origin_agency is not None else current_user.agency_id,
+        actor_user_id=current_user.id,
     )
 
 
@@ -230,6 +253,15 @@ def update_shipment_endpoint(
 ) -> ShipmentResponse:
     if get_scoped_shipment(db, encomienda_id, current_user) is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shipment not found")
+    origin_agency = get_agency_for_origin(db, payload.origin)
+    if origin_agency is not None and not origin_agency.is_active:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="La agencia de origen está inactiva")
+    if is_business_user(current_user) and not is_global_admin(current_user):
+        if origin_agency is None or origin_agency.id != current_user.agency_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="El origen debe corresponder a la agencia asignada a tu usuario.",
+            )
     try:
         shipment = update_shipment(db, encomienda_id, payload, actor_user_id=current_user.id)
     except ValueError as exc:

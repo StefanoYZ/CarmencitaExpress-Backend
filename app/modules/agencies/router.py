@@ -19,6 +19,7 @@ from app.modules.agencies.service import (
     assign_agency_admin,
     create_agency,
     create_agency_user,
+    get_agency_for_origin,
     get_scoped_agency,
     is_global_admin,
     is_agency_admin,
@@ -284,8 +285,21 @@ def create_agency_shipment_endpoint(
     agency = _get_scoped_agency_or_404(db, agency_id, current_user)
     if not agency.is_active:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="La agencia esta inactiva")
+    origin_agency = get_agency_for_origin(db, payload.origin)
+    if origin_agency is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El origen seleccionado no está vinculado a una agencia.",
+        )
+    if not origin_agency.is_active:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="La agencia de origen está inactiva")
+    if not is_global_admin(current_user) and origin_agency.id != agency.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El origen debe coincidir con la agencia asignada a tu usuario.",
+        )
     return create_shipment(
-        db, payload, agency_id=agency.id, actor_user_id=current_user.id
+        db, payload, agency_id=origin_agency.id, actor_user_id=current_user.id
     )
 
 

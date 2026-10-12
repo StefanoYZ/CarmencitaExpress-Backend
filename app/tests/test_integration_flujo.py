@@ -216,9 +216,11 @@ def test_it05_encomiendas_registradas_alimentan_optimizacion_estiba(
     optimización, ejecutable solo por ESTIBA. Verifica la costura registro→carga y
     que el control de acceso por rol se aplique en el flujo real.
     """
+    origin = api_client.get("/api/v1/reclamos/agencias").json()[0]["place"]
     for index, destino in enumerate(("Shorey", "Angasmarca", "Orocullay"), start=1):
         payload = {
             **valid_shipment_payload,
+            "origen": origin,
             "descripcion": f"Encomienda IT-05 {index}",
             "destino": destino,
             "tipo_contenido": "ROPA",

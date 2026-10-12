@@ -4,6 +4,7 @@ import json
 from sqlalchemy.orm import Session
 
 from app.core.business_time import business_now
+from app.modules.agencies.service import get_agency_for_origin
 from app.modules.clients.service import upsert_client_from_person_data
 from app.modules.measurement_logs.service import (
     ensure_boleta_log_after_payment,
@@ -39,19 +40,23 @@ def create_shipment(
     actor_user_id: int | None = None,
 ) -> Shipment:
     _upsert_clients_from_shipment_payload(db, payload, commit=False)
+    origin_agency = get_agency_for_origin(db, payload.origin)
+    assigned_agency_id = origin_agency.id if origin_agency is not None else agency_id
     return repository.create_shipment(
-        db, payload, agency_id=agency_id, privacy_channel=privacy_channel,
+        db, payload, agency_id=assigned_agency_id, privacy_channel=privacy_channel,
         actor_user_id=actor_user_id,
     )
 
 
 def create_pre_registration(db: Session, payload: ShipmentPreRegistrationCreate) -> Shipment:
     _upsert_clients_from_shipment_payload(db, payload, commit=False)
+    origin_agency = get_agency_for_origin(db, payload.origin)
     shipment = repository.create_pre_registration(
         db,
         payload,
         privacy_accepted_at=business_now(),
         privacy_channel="PUBLIC_WEB",
+        agency_id=origin_agency.id if origin_agency is not None else None,
     )
     start_service_phase(
         db,
@@ -102,7 +107,13 @@ def confirm_pre_registration(
         db.flush()
     if shipment.content_type != "DOCUMENTOS" and not shipment.base_orientation:
         raise ValueError("Falta seleccionar la cara/base del paquete antes de confirmar el pre-registro")
-    shipment = repository.confirm_pre_registration(db, shipment, actor_user_id=actor_user_id)
+    origin_agency = get_agency_for_origin(db, shipment.origin)
+    shipment = repository.confirm_pre_registration(
+        db,
+        shipment,
+        actor_user_id=actor_user_id,
+        agency_id=origin_agency.id if origin_agency is not None else None,
+    )
     try:
         finish_service_phase(db, "registro", encomienda_id=shipment.id, usuario_id=actor_user_id)
     except LookupError:
@@ -129,7 +140,14 @@ def update_shipment(
     if payload.status is not None and payload.status != shipment.status:
         raise ValueError("No se puede modificar el estado desde este endpoint")
     _upsert_clients_from_shipment_payload(db, payload, commit=False)
-    return repository.update_shipment(db, shipment, payload, actor_user_id=actor_user_id)
+    origin_agency = get_agency_for_origin(db, payload.origin)
+    return repository.update_shipment(
+        db,
+        shipment,
+        payload,
+        actor_user_id=actor_user_id,
+        origin_agency_id=origin_agency.id if origin_agency is not None else None,
+    )
 
 
 def cancel_shipment_with_reason(

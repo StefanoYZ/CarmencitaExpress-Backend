@@ -1,6 +1,7 @@
 import logging
 
 from app.core.database import SessionLocal, create_db_tables
+from app.modules.agencies.service import backfill_shipment_agencies_by_origin
 from app.modules.destinations.service import seed_default_destinations
 from app.modules.users.service import seed_initial_access_control
 
@@ -14,6 +15,9 @@ def bootstrap_database() -> None:
     try:
         seed_initial_access_control(db)
         seed_default_destinations(db)
+        reassigned = backfill_shipment_agencies_by_origin(db)
+        if reassigned:
+            logger.info("Assigned %s existing shipments to their origin agencies", reassigned)
     finally:
         db.close()
 

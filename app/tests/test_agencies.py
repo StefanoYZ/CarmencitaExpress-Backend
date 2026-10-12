@@ -195,19 +195,40 @@ def test_agency_users_and_dashboard_are_server_scoped(
         )
         assert response.status_code == 201, response.text
 
+    wrong_origin = api_client.post(
+        f"/api/v1/agencias/{first['id']}/encomiendas",
+        headers=first_headers,
+        json={**valid_shipment_payload, "origen": second["destination"]["name"]},
+    )
+    assert wrong_origin.status_code == 400
+
+    first_origin = first["destination"]["name"]
+    first_destination = "Trujillo" if first_origin != "Trujillo" else "Angasmarca"
+    first_shipment_payload = {
+        **valid_shipment_payload,
+        "origen": first_origin,
+        "destino": first_destination,
+    }
     first_shipment = api_client.post(
         f"/api/v1/agencias/{first['id']}/encomiendas",
         headers=first_headers,
-        json=valid_shipment_payload,
+        json=first_shipment_payload,
     )
     assert first_shipment.status_code == 201, first_shipment.text
-    second_payload = {**valid_shipment_payload, "remitente_numero_documento": "70123457"}
+    assert first_shipment.json()["agency_id"] == first["id"]
+    second_payload = {
+        **valid_shipment_payload,
+        "remitente_numero_documento": "70123457",
+        "origen": second["destination"]["name"],
+        "destino": "Trujillo" if second["destination"]["name"] != "Trujillo" else "Angasmarca",
+    }
     second_shipment = api_client.post(
         f"/api/v1/agencias/{second['id']}/encomiendas",
         headers=second_headers,
         json=second_payload,
     )
     assert second_shipment.status_code == 201, second_shipment.text
+    assert second_shipment.json()["agency_id"] == second["id"]
 
     own_users = api_client.get(f"/api/v1/agencias/{first['id']}/users", headers=first_headers)
     assert own_users.status_code == 200
@@ -247,6 +268,64 @@ def test_agency_users_and_dashboard_are_server_scoped(
     )
     assert excluded.status_code == 200
     assert excluded.json()["input_count"] == 0
+
+
+def test_origin_agency_assignment_and_backfill_make_shipments_visible(
+    api_client: TestClient,
+    admin_headers: dict[str, str],
+    db_session,
+    valid_shipment_payload: dict,
+) -> None:
+    from app.modules.agencies.service import backfill_shipment_agencies_by_origin
+    from app.modules.destinations.model import Destination
+    from app.modules.shipments.repository import create_shipment as create_shipment_in_repository
+    from app.modules.shipments.schema import ShipmentCreate
+
+    trujillo = db_session.query(Destination).filter(Destination.name == "Trujillo").one()
+    agency = _create_agency(api_client, admin_headers, trujillo.id)
+    legacy = create_shipment_in_repository(
+        db_session,
+        ShipmentCreate.model_validate({**valid_shipment_payload, "origen": "Trujillo"}),
+    )
+    assert legacy.agency_id is None
+
+    public_payload = {
+        **valid_shipment_payload,
+        "origen": "Trujillo",
+        "remitente_numero_documento": "70121112",
+    }
+    public_shipment = api_client.post("/api/v1/encomiendas/registro-publico", json=public_payload)
+    assert public_shipment.status_code == 201, public_shipment.text
+    assert public_shipment.json()["agency_id"] == agency["id"]
+
+    pre_registration = api_client.post(
+        "/api/v1/encomiendas/pre-registro",
+        json={
+            **valid_shipment_payload,
+            "origen": "Trujillo",
+            "remitente_numero_documento": "70121113",
+        },
+    )
+    assert pre_registration.status_code == 201, pre_registration.text
+    pre_registered_shipment = db_session.get(Shipment, pre_registration.json()["id"])
+    assert pre_registered_shipment.agency_id == agency["id"]
+
+    updated_rows = backfill_shipment_agencies_by_origin(db_session)
+    db_session.refresh(legacy)
+    assert updated_rows == 1
+    assert legacy.agency_id == agency["id"]
+
+    listed = api_client.get(
+        f"/api/v1/agencias/{agency['id']}/encomiendas", headers=admin_headers
+    )
+    assert listed.status_code == 200, listed.text
+    expected_ids = {legacy.id, public_shipment.json()["id"], pre_registered_shipment.id}
+    assert {row["id"] for row in listed.json()} == expected_ids
+    dashboard = api_client.get(
+        f"/api/v1/agencias/{agency['id']}/dashboard", headers=admin_headers
+    )
+    assert dashboard.status_code == 200, dashboard.text
+    assert dashboard.json()["total_shipments"] == 3
 
 
 def test_public_pre_registration_requires_and_records_privacy_notice(

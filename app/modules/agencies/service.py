@@ -13,6 +13,7 @@ from app.modules.agencies.schema import (
     AgencyUserCreate,
 )
 from app.modules.destinations.model import Destination
+from app.modules.destinations.schema import normalize_destination_key
 from app.modules.shipments.constants import CANCELED_STATUS, DELIVERED_STATUS
 from app.modules.shipments.model import Shipment
 from app.modules.users.model import InternalUser, Role
@@ -36,6 +37,38 @@ def is_agency_admin(user: InternalUser) -> bool:
 
 def is_business_user(user: InternalUser) -> bool:
     return any(role.name in BUSINESS_ROLES and role.is_active for role in user.roles)
+
+
+def get_agency_for_origin(db: Session, origin: str) -> Agency | None:
+    origin_key = normalize_destination_key(origin)
+    if not origin_key:
+        return None
+    return (
+        db.query(Agency)
+        .join(Destination, Agency.destination_id == Destination.id)
+        .filter(Destination.normalized_name == origin_key)
+        .first()
+    )
+
+
+def backfill_shipment_agencies_by_origin(db: Session) -> int:
+    """Align existing shipment ownership with the agency at the recorded origin."""
+    agencies_by_origin = {
+        destination.normalized_name: agency
+        for agency, destination in db.query(Agency, Destination)
+        .join(Destination, Agency.destination_id == Destination.id)
+        .all()
+    }
+    updated = 0
+    for shipment in db.query(Shipment).all():
+        agency = agencies_by_origin.get(normalize_destination_key(shipment.origin))
+        if agency is not None and shipment.agency_id != agency.id:
+            shipment.agency_id = agency.id
+            db.add(shipment)
+            updated += 1
+    if updated:
+        db.commit()
+    return updated
 
 
 def get_scoped_agency(db: Session, agency_id: int, current_user: InternalUser) -> Agency | None:

@@ -104,9 +104,11 @@ def test_best_fit_decreasing_uses_registered_shipments_and_skips_envelopes(
     estiba_headers,
     valid_shipment_payload,
 ):
+    origin = api_client.get("/api/v1/reclamos/agencias").json()[0]["place"]
     for index, destination in enumerate(("Shorey", "Angasmarca", "Orocullay"), start=1):
         payload = {
             **valid_shipment_payload,
+            "origen": origin,
             "descripcion": f"Paquete optimizable {index}",
             "destino": destination,
             "tipo_contenido": "ROPA",
@@ -120,6 +122,7 @@ def test_best_fit_decreasing_uses_registered_shipments_and_skips_envelopes(
 
     envelope_payload = {
         **valid_shipment_payload,
+        "origen": origin,
         "descripcion": "Sobre sin estiba",
         "destino": "Cachicadan",
         "tipo_contenido": "DOCUMENTOS",
@@ -165,10 +168,12 @@ def test_run_with_package_codes_filters_selected_shipments(
 ):
     """Regresión: el camino con package_codes (list_registered_packages_by_codes)
     fallaba con NameError por un import faltante de business_day_utc_bounds."""
+    origin = api_client.get("/api/v1/reclamos/agencias").json()[0]["place"]
     codes = []
     for index, destination in enumerate(("Shorey", "Angasmarca"), start=1):
         payload = {
             **valid_shipment_payload,
+            "origen": origin,
             "descripcion": f"Paquete por codigo {index}",
             "destino": destination,
             "tipo_contenido": "ROPA",
