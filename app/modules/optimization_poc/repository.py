@@ -2,6 +2,7 @@
 from pathlib import Path
 from random import Random
 
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from app.core.business_time import business_today, ensure_business_tz
@@ -65,7 +66,10 @@ def list_registered_packages(db: Session, limit: int | None = None, agency_id: i
     hoy = business_today()
     query = db.query(Shipment).filter(Shipment.status.in_(OPTIMIZABLE_SHIPMENT_STATUSES))
     if agency_id is not None:
-        query = query.filter(Shipment.agency_id == agency_id)
+        query = query.filter(or_(
+            Shipment.agency_id == agency_id,
+            and_(Shipment.agency_id.is_(None), Shipment.description.like(f"{TEST_PACKAGE_MARKER}%")),
+        ))
     shipments = query.order_by(Shipment.created_at.asc(), Shipment.id.asc()).all()
     reales_del_dia = [
         shipment
@@ -99,12 +103,15 @@ def list_registered_packages_by_codes(db: Session, codes: list[str], agency_id: 
         Shipment.shipment_code.in_(normalized_codes),
     )
     if agency_id is not None:
-        query = query.filter(Shipment.agency_id == agency_id)
+        query = query.filter(or_(
+            Shipment.agency_id == agency_id,
+            and_(Shipment.agency_id.is_(None), Shipment.description.like(f"{TEST_PACKAGE_MARKER}%")),
+        ))
     shipments = query.all()
     shipment_by_code = {
         shipment.shipment_code.upper(): shipment
         for shipment in shipments
-        if ensure_business_tz(shipment.created_at).date() == hoy
+        if _is_test_shipment(shipment) or ensure_business_tz(shipment.created_at).date() == hoy
     }
     return [
         _shipment_to_package(shipment_by_code[code])

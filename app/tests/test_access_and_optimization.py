@@ -1,4 +1,8 @@
 import pytest
+from datetime import timedelta
+
+from app.modules.optimization_poc.test_data import seed_test_packages
+from app.modules.shipments.model import Shipment
 
 
 def test_login_rejects_invalid_password(api_client):
@@ -197,3 +201,30 @@ def test_run_with_package_codes_filters_selected_shipments(
     assert data["input_count"] == len(codes)
     placed_codes = {placement["codigo"] for placement in data["placements"]}
     assert placed_codes.issubset(set(codes))
+
+
+def test_optimization_test_batch_matches_scenario_and_respects_agency(
+    api_client, db_session, estiba_headers,
+):
+    """The shared test batch must be runnable even after its registration day."""
+    seed_test_packages(db_session, n=2)
+    test_shipments = db_session.query(Shipment).filter(Shipment.description.like("[PRUEBA]%")).all()
+    assert len(test_shipments) == 2
+    for shipment in test_shipments:
+        shipment.created_at -= timedelta(days=2)
+    db_session.commit()
+
+    scenario = api_client.get("/api/v1/optimization/poc/scenario", headers=estiba_headers)
+    assert scenario.status_code == 200, scenario.text
+    codes = [item["codigo"] for item in scenario.json()["packages"]]
+    assert set(codes) == {shipment.shipment_code for shipment in test_shipments}
+
+    for path in ("first-fit", "minimax-maximin", "best-fit", "worst-fit", "best-fit-decreasing", "backtracking"):
+        response = api_client.post(
+            f"/api/v1/optimization/poc/{path}/run",
+            headers=estiba_headers,
+            json={"truck_id": "CAMION_A", "package_codes": codes, "allow_rotation": True},
+        )
+        assert response.status_code == 200, (path, response.text)
+        assert response.json()["input_count"] == len(codes)
+        assert {item["codigo"] for item in response.json()["ordered_packages"]} == set(codes)
