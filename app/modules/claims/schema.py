@@ -99,9 +99,29 @@ class InPersonClaimShipmentLookupResponse(BaseModel):
 
 
 class ClaimStatusLookup(BaseModel):
-    case_code: str = Field(min_length=12, max_length=32)
-    shipment_code: str = Field(min_length=8, max_length=24)
-    document_number: str = Field(min_length=8, max_length=20)
+    model_config = ConfigDict(extra="forbid")
+
+    case_code: str | None = Field(default=None, min_length=8, max_length=32)
+    shipment_code: str | None = Field(default=None, min_length=8, max_length=24)
+    document_number: str | None = Field(default=None, min_length=8, max_length=20)
+
+    @field_validator("case_code", "shipment_code")
+    @classmethod
+    def normalize_lookup_code(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        return re.sub(r"\s+", "", value).upper()
+
+    @field_validator("document_number")
+    @classmethod
+    def normalize_lookup_document(cls, value: str | None) -> str | None:
+        return value.strip() if value is not None else None
+
+    @model_validator(mode="after")
+    def require_lookup_identifier(self):
+        if not any((self.case_code, self.shipment_code, self.document_number)):
+            raise ValueError("Ingresa un código de caso, código de encomienda o DNI")
+        return self
 
 
 class ClaimEventResponse(BaseModel):
@@ -197,12 +217,8 @@ class PublicClaimCreateResponse(BaseModel):
 
 class PublicClaimStatusResponse(BaseModel):
     case_code: str
-    category: str
     status: str
     created_at: datetime
-    resolution_text: str | None
-    events: list[PublicClaimEventResponse]
-    shipment_events: list[PublicShipmentTraceResponse]
 
 
 class ClaimEventCreate(BaseModel):

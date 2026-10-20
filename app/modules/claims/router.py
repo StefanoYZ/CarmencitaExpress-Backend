@@ -85,8 +85,8 @@ def create_public_claim_endpoint(payload: PublicClaimCreate, db: Session = Depen
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
 
-@router.post("/consulta", response_model=PublicClaimStatusResponse)
-def public_claim_status_endpoint(payload: ClaimStatusLookup, db: Session = Depends(get_db)) -> PublicClaimStatusResponse:
+@router.post("/consulta", response_model=list[PublicClaimStatusResponse])
+def public_claim_status_endpoint(payload: ClaimStatusLookup, db: Session = Depends(get_db)) -> list[PublicClaimStatusResponse]:
     return get_public_claim_status(db, payload)
 
 

@@ -41,16 +41,40 @@ def test_public_claim_validates_shipment_party_and_returns_safe_status(
     invalid_party = api_client.post("/api/v1/reclamos/publicos", json={**payload, "document_number": "11111111"})
     assert invalid_party.status_code == 404
 
+    second_claim = api_client.post("/api/v1/reclamos/publicos", json=payload)
+    assert second_claim.status_code == 201, second_claim.text
+
     status_response = api_client.post("/api/v1/reclamos/consulta", json={
         "case_code": created.json()["case_code"],
         "shipment_code": shipment["codigo_encomienda"],
         "document_number": payload["document_number"],
     })
     assert status_response.status_code == 200, status_response.text
-    assert status_response.json()["case_code"] == created.json()["case_code"]
-    assert "claimant_name" not in status_response.json()
-    assert all("actor_name" not in event for event in status_response.json()["events"])
-    assert all("actor_name" not in event for event in status_response.json()["shipment_events"])
+    assert status_response.json() == [{
+        "case_code": created.json()["case_code"],
+        "status": "RECIBIDO",
+        "created_at": status_response.json()[0]["created_at"],
+    }]
+    assert set(status_response.json()[0]) == {"case_code", "status", "created_at"}
+
+    for lookup in (
+        {"case_code": created.json()["case_code"]},
+        {"shipment_code": shipment["codigo_encomienda"]},
+        {"document_number": payload["document_number"]},
+    ):
+        response = api_client.post("/api/v1/reclamos/consulta", json=lookup)
+        assert response.status_code == 200, response.text
+    by_shipment = api_client.post("/api/v1/reclamos/consulta", json={
+        "shipment_code": shipment["codigo_encomienda"],
+    })
+    assert {item["case_code"] for item in by_shipment.json()} == {
+        created.json()["case_code"], second_claim.json()["case_code"],
+    }
+    assert api_client.post("/api/v1/reclamos/consulta", json={}).status_code == 422
+    assert api_client.post("/api/v1/reclamos/consulta", json={
+        "case_code": created.json()["case_code"],
+        "document_number": "11111111",
+    }).status_code == 404
 
 
 def test_monetary_claim_requires_image_and_admin_verification(

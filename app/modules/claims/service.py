@@ -27,9 +27,7 @@ from app.modules.claims.schema import (
     PublicAgencyContact,
     PublicClaimCreate,
     PublicClaimCreateResponse,
-    PublicClaimEventResponse,
     PublicClaimStatusResponse,
-    PublicShipmentTraceResponse,
     ShipmentTraceCreate,
     ShipmentTraceResponse,
     MAX_IMAGE_BYTES,
@@ -229,33 +227,26 @@ def list_claim_attachments(db: Session, claim_id: int) -> list[ClaimAttachmentRe
     return [ClaimAttachmentResponse.model_validate(item) for item in attachments]
 
 
-def get_public_claim_status(db: Session, payload: ClaimStatusLookup) -> PublicClaimStatusResponse:
-    claim = db.query(Claim).filter(Claim.case_code == payload.case_code.strip().upper()).first()
-    shipment = _find_shipment(db, payload.shipment_code)
-    if claim is None or shipment is None or claim.shipment_id != shipment.id:
+def get_public_claim_status(db: Session, payload: ClaimStatusLookup) -> list[PublicClaimStatusResponse]:
+    query = db.query(Claim).join(Shipment, Claim.shipment_id == Shipment.id)
+    if payload.case_code:
+        query = query.filter(Claim.case_code == payload.case_code)
+    if payload.shipment_code:
+        query = query.filter(Shipment.shipment_code == payload.shipment_code)
+    if payload.document_number:
+        query = query.filter(Claim.claimant_document_number == payload.document_number)
+
+    claims = query.order_by(Claim.created_at.desc(), Claim.id.desc()).limit(100).all()
+    if not claims:
         raise _not_found()
-    _match_claimant(shipment, payload.document_number)
-    events = (
-        db.query(ClaimEvent)
-        .filter(ClaimEvent.claim_id == claim.id, ClaimEvent.visible_to_customer.is_(True))
-        .order_by(ClaimEvent.created_at.asc())
-        .all()
-    )
-    trace = (
-        db.query(ShipmentTraceEvent)
-        .filter(ShipmentTraceEvent.shipment_id == shipment.id, ShipmentTraceEvent.visible_to_customer.is_(True))
-        .order_by(ShipmentTraceEvent.created_at.asc())
-        .all()
-    )
-    return PublicClaimStatusResponse(
-        case_code=claim.case_code,
-        category=claim.category,
-        status=claim.status,
-        created_at=claim.created_at,
-        resolution_text=claim.resolution_text if claim.status in {"RESUELTO", "CERRADO"} else None,
-        events=[PublicClaimEventResponse.model_validate(item) for item in events],
-        shipment_events=[PublicShipmentTraceResponse.model_validate(item) for item in trace],
-    )
+    return [
+        PublicClaimStatusResponse(
+            case_code=claim.case_code,
+            status=claim.status,
+            created_at=claim.created_at,
+        )
+        for claim in claims
+    ]
 
 
 def get_public_claim_for_attachment(
