@@ -217,8 +217,13 @@ class PublicClaimCreateResponse(BaseModel):
 
 class PublicClaimStatusResponse(BaseModel):
     case_code: str
+    category: str
+    description: str
+    requested_solution: str | None
     status: str
     created_at: datetime
+    resolution_text: str | None
+    events: list[PublicClaimEventResponse]
 
 
 class ClaimEventCreate(BaseModel):

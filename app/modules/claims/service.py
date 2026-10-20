@@ -27,6 +27,7 @@ from app.modules.claims.schema import (
     PublicAgencyContact,
     PublicClaimCreate,
     PublicClaimCreateResponse,
+    PublicClaimEventResponse,
     PublicClaimStatusResponse,
     ShipmentTraceCreate,
     ShipmentTraceResponse,
@@ -239,11 +240,24 @@ def get_public_claim_status(db: Session, payload: ClaimStatusLookup) -> list[Pub
     claims = query.order_by(Claim.created_at.desc(), Claim.id.desc()).limit(100).all()
     if not claims:
         raise _not_found()
+    claim_ids = [claim.id for claim in claims]
+    public_events = db.query(ClaimEvent).filter(
+        ClaimEvent.claim_id.in_(claim_ids),
+        ClaimEvent.visible_to_customer.is_(True),
+    ).order_by(ClaimEvent.created_at.asc()).all()
+    events_by_claim: dict[int, list[PublicClaimEventResponse]] = {claim_id: [] for claim_id in claim_ids}
+    for event in public_events:
+        events_by_claim[event.claim_id].append(PublicClaimEventResponse.model_validate(event))
     return [
         PublicClaimStatusResponse(
             case_code=claim.case_code,
+            category=claim.category,
+            description=claim.description,
+            requested_solution=claim.requested_solution,
             status=claim.status,
             created_at=claim.created_at,
+            resolution_text=claim.resolution_text if claim.status in {"RESUELTO", "CERRADO"} else None,
+            events=events_by_claim[claim.id],
         )
         for claim in claims
     ]

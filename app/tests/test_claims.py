@@ -8,8 +8,11 @@ def _create_public_shipment(client: TestClient, payload: dict) -> dict:
 
 def test_public_claim_validates_shipment_party_and_returns_safe_status(
     api_client: TestClient,
+    db_session,
     valid_shipment_payload: dict,
 ) -> None:
+    from app.modules.claims.model import Claim, ClaimEvent
+
     shipment = _create_public_shipment(api_client, valid_shipment_payload)
     sender_lookup = api_client.get(
         f"/api/v1/reclamos/publicos/encomiendas/{shipment['codigo_encomienda']}/remitente"
@@ -37,6 +40,14 @@ def test_public_claim_validates_shipment_party_and_returns_safe_status(
     created = api_client.post("/api/v1/reclamos/publicos", json=payload)
     assert created.status_code == 201, created.text
     assert created.json()["status"] == "RECIBIDO"
+    claim = db_session.query(Claim).filter_by(case_code=created.json()["case_code"]).one()
+    db_session.add(ClaimEvent(
+        claim_id=claim.id,
+        event_type="NOTA",
+        note="Nota interna no visible al cliente.",
+        visible_to_customer=False,
+    ))
+    db_session.commit()
 
     invalid_party = api_client.post("/api/v1/reclamos/publicos", json={**payload, "document_number": "11111111"})
     assert invalid_party.status_code == 404
@@ -50,12 +61,27 @@ def test_public_claim_validates_shipment_party_and_returns_safe_status(
         "document_number": payload["document_number"],
     })
     assert status_response.status_code == 200, status_response.text
-    assert status_response.json() == [{
+    public_status = status_response.json()[0]
+    assert public_status == {
         "case_code": created.json()["case_code"],
+        "category": "DANO",
+        "description": "El paquete llegó con la caja dañada.",
+        "requested_solution": "Solicito que revisen el caso.",
         "status": "RECIBIDO",
-        "created_at": status_response.json()[0]["created_at"],
-    }]
-    assert set(status_response.json()[0]) == {"case_code", "status", "created_at"}
+        "created_at": public_status["created_at"],
+        "resolution_text": None,
+        "events": [{
+            "id": public_status["events"][0]["id"],
+            "event_type": "RECIBIDO",
+            "from_status": None,
+            "to_status": None,
+            "note": "Hemos recibido tu solicitud.",
+            "created_at": public_status["events"][0]["created_at"],
+        }],
+    }
+    assert "Nota interna no visible al cliente." not in str(public_status)
+    assert "claimant_document_number" not in public_status
+    assert "actor_name" not in public_status["events"][0]
 
     for lookup in (
         {"case_code": created.json()["case_code"]},
@@ -141,6 +167,9 @@ def test_monetary_claim_requires_image_and_admin_verification(
     assert resolution.status_code == 200, resolution.text
     assert resolution.json()["status"] == "PAGO_POR_VERIFICAR"
     assert resolution.json()["resolution_recorded_by_name"] == "Claim Verifier"
+    pending_public_status = api_client.post("/api/v1/reclamos/consulta", json={"case_code": created.json()["case_code"]})
+    assert pending_public_status.status_code == 200, pending_public_status.text
+    assert pending_public_status.json()[0]["resolution_text"] is None
 
     verified = api_client.post(f"/api/v1/reclamos/{claim['id']}/verificar-pago", headers=agency_headers, params={"agency_id": agency["id"]},
                                json={"verified": True, "note": "Comprobante revisado."})
@@ -149,6 +178,11 @@ def test_monetary_claim_requires_image_and_admin_verification(
     assert verified.json()["payment_verified_at"] is not None
     assert verified.json()["payment_verified_by_name"] == "Claim Verifier"
     assert verified.json()["resolved_by_name"] == "Claim Verifier"
+    resolved_public_status = api_client.post("/api/v1/reclamos/consulta", json={"case_code": created.json()["case_code"]})
+    assert resolved_public_status.status_code == 200, resolved_public_status.text
+    assert resolved_public_status.json()[0]["resolution_text"] == "Se realizó el abono al cliente."
+    assert any(event["note"] == "El pago de la solución fue verificado y el reclamo está resuelto."
+               for event in resolved_public_status.json()[0]["events"])
 
 
 def test_secretaria_can_open_an_in_person_case_in_her_agency(
